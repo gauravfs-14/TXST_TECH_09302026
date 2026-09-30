@@ -1,7 +1,7 @@
 import { ReactNode, useRef, useState } from "react";
 import {
-  ArrowRight, Check as CheckIcon, ChevronDown, ChevronRight, Ellipsis, Lightbulb, Minus, SlidersHorizontal, CircleAlert, Clock, Copy, Download, Eye, FileText, Globe, House, Info, KeyRound, Leaf, Link as LinkIcon, ListChecks, Loader2,
-  MessageSquare, Package, Pencil, Plus, Printer, Play, RefreshCw, Repeat, Search, Settings, ShieldCheck, Sparkles, Square, Tag, Trash2, TriangleAlert, Undo2, X,
+  ArrowRight, Check as CheckIcon, ChevronDown, ChevronRight, Ellipsis, Lightbulb, Minus, SlidersHorizontal, CircleAlert, Clock, Copy, Download, Eye, FileText, Globe, House, Info, Moon, KeyRound, Leaf, Link as LinkIcon, ListChecks, Loader2,
+  MessageSquare, Package, Pencil, Plus, Printer, Play, RefreshCw, Repeat, Search, Settings, ShieldCheck, Sparkles, Square, Sun, Tag, Trash2, TriangleAlert, Undo2, X,
   type LucideIcon,
 } from "lucide-react";
 import { toast as sonner } from "sonner";
@@ -21,6 +21,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs as ShTabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Toaster as ShToaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
+import { useTheme } from "./landing/theme";
 export { useAction, usePoll } from "./hooks";
 
 /* ---------- icons (lucide, under the short names the pages use) ---------- */
@@ -28,7 +29,7 @@ const ICONS = {
   leaf: Leaf, check: CheckIcon, search: Search, spark: Sparkles, globe: Globe, shield: ShieldCheck, box: Package, chat: MessageSquare, key: KeyRound, arrow: ArrowRight, undo: Undo2,
   download: Download, clock: Clock, plus: Plus, edit: Pencil, home: House, eye: Eye, loop: Repeat, list: ListChecks, tag: Tag, file: FileText, gear: Settings, copy: Copy,
   minus: Minus, down: ChevronDown, more: Ellipsis, tips: Lightbulb, sliders: SlidersHorizontal,
-  alert: TriangleAlert, info: Info, x: X, chevron: ChevronRight, trash: Trash2, print: Printer, stop: Square, play: Play, refresh: RefreshCw, link: LinkIcon,
+  alert: TriangleAlert, info: Info, x: X, chevron: ChevronRight, trash: Trash2, print: Printer, stop: Square, play: Play, sun: Sun, moon: Moon, refresh: RefreshCw, link: LinkIcon,
 } satisfies Record<string, LucideIcon>;
 export type IconName = keyof typeof ICONS;
 export const Icon = ({ n, size = 20 }: { n: IconName; size?: number }) => { const C = ICONS[n]; return <C size={size} strokeWidth={1.8} aria-hidden="true" />; };
@@ -36,7 +37,7 @@ export const Spinner = ({ className }: { className?: string }) => <Loader2 class
 
 /* ---------- toasts (sonner) ---------- */
 export const toast = (msg: string) => { sonner(msg); };
-export const Toaster = () => <ShToaster position="bottom-center" />;
+export const Toaster = () => <ShToaster position="bottom-center" theme={useTheme().theme} />;
 
 /* ---------- primitives ---------- */
 type Kind = "primary" | "quiet" | "text" | "danger";
@@ -117,7 +118,7 @@ export function ListInput({ values, onChange, placeholder, addLabel }: { values:
 }
 export function Choice({ icon, title, text, on, disabled, onClick, badge }: { icon: IconName; title: string; text: string; on?: boolean; disabled?: boolean; onClick?: () => void; badge?: string }) {
   return (<button type="button" disabled={disabled} onClick={onClick} aria-pressed={on}
-    className={cn("flex w-full items-start gap-3.5 rounded-xl border-[1.5px] bg-card p-3.5 text-left transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-55", on ? "border-primary bg-success-soft" : "border-input enabled:hover:border-primary")}>
+    className={cn("flex w-full items-start gap-3.5 rounded-xl border-[1.5px] bg-card p-3.5 text-left transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-55", on ? "border-primary bg-accent" : "border-input enabled:hover:border-primary")}>
     <span className="grid size-9 flex-none place-items-center rounded-lg bg-muted text-primary"><Icon n={icon} /></span>
     <span><b>{title}</b> {badge && <Badge>{badge}</Badge>}<br /><span className="text-sm text-muted-foreground">{text}</span></span>
     <span className={cn("ml-auto text-primary", on ? "opacity-100" : "opacity-0")}><Icon n="check" /></span></button>);
