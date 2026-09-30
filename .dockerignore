@@ -1,0 +1,13 @@
+.git
+.claude
+.gstack
+**/node_modules
+**/.venv
+**/__pycache__
+frontend/dist
+backend/data
+backend/*.db*
+docs
+assets
+*.md
+!backend/README.md

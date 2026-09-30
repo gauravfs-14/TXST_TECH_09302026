@@ -63,6 +63,11 @@ class Settings(BaseSettings):
 
     enable_scheduler: bool = True
 
+    # Built web app (frontend/dist). When the folder exists the API serves the whole product from one port.
+    static_dir: str = "../frontend/dist"
+    # Extra browser origins allowed to call the API (only needed when the UI is served from somewhere else).
+    cors_origins: list[str] = ["http://localhost:5173"]
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,0 +1,18 @@
+services:
+  confiance:
+    build: .
+    image: confiance:latest
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - confiance-data:/data
+    environment:
+      # Optional tuning, e.g. CONFIANCE_LLM_MAX_CONCURRENCY=2 (see backend/src/confiance/config.py).
+      CONFIANCE_LLM_MAX_CONCURRENCY: ${CONFIANCE_LLM_MAX_CONCURRENCY:-4}
+    extra_hosts:
+      # Lets the container reach Ollama/LM Studio running on your computer: http://host.docker.internal:11434/v1
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  confiance-data:

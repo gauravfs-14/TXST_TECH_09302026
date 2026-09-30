@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
@@ -49,7 +51,7 @@ async def _task_header(request, call_next):
         return await call_next(request)
 
 
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_origins, allow_methods=["*"], allow_headers=["*"])
 
 
 def _404(x, what):
@@ -72,6 +74,11 @@ def _project_out(p: Project) -> dict:
     return {"id": p.id, "name": p.name, "domain": p.domain, "site_url": p.site_url, "model": get_settings().llm_model, "brand_aliases": p.brand_aliases, "engines": p.engines,
             "deploy_config": {k: v for k, v in p.deploy_config.items() if "password" not in k and not k.startswith("_")},
             "brief_version": p.current_brief_version, "kb_version": p.kb_version}
+
+
+@app.get("/api/health")
+def health():
+    return {"ok": True, "version": app.version}
 
 
 @app.get("/api/engines")
@@ -441,3 +448,16 @@ def ack_alert(aid: int):
         _404(s.get(Alert, aid), "alert").acknowledged = True
     audit.record("alert.acknowledged", "user", {"alert_id": aid})
     return {"ok": True}
+
+
+# ---- web app (only when frontend/dist has been built) -----------------------------------------------
+# Registered last so it can never shadow an /api route. Unknown paths fall back to index.html; the page itself
+# decides between the marketing site and /dashboard.
+_dist = Path(get_settings().static_dir).resolve()
+if (_dist / "index.html").is_file():
+    @app.get("/{path:path}", include_in_schema=False)
+    def web(path: str):
+        if path.startswith("api/"):
+            raise HTTPException(404, "not found")
+        f = (_dist / path).resolve()
+        return FileResponse(f if f.is_file() and _dist in f.parents else _dist / "index.html")
