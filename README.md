@@ -17,6 +17,18 @@ products, test improvements safely before anything goes live, and keep proving (
 
 ---
 
+## ▶️ Watch the demo
+
+<div align="center">
+
+[![Watch the Confiance demo on YouTube](https://img.youtube.com/vi/oxSwqexQ8kA/maxresdefault.jpg)](https://youtu.be/oxSwqexQ8kA)
+
+<sub>Click the image to watch on YouTube.</sub>
+
+</div>
+
+---
+
 ## Contents
 
 1. [What is Confiance?](#-what-is-confiance)
