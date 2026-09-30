@@ -134,7 +134,9 @@ def write_narrative(run_id: int) -> str:
     top = [a["title"] for a in rep["plan"][:5]]
     res = llm.chat("report.narrative", [{"role": "system", "content": "You write clear, honest, plain-language executive summaries for business owners. No jargon, no hype, no invented numbers."},
                                         {"role": "user", "content": "Write two short paragraphs (under 170 words in total). First: what we found about how AI assistants and search see the business today and the main reasons. "
-                                                                    "Second: what was changed and tested, how it did (be honest if there was no clear improvement), and the top priorities. Use ONLY these facts: "
+                                                                    "Second: what was changed and tested, how it did (be honest if there was no clear improvement), and the top priorities. "
+                                                                    "site_score is the website's technical health out of 100; it is NOT the visibility score and must never be described as changing because of the edits. "
+                                                                    "Do not mention products or product citations unless the facts show product results. Use ONLY these facts: "
                                                                     f"{facts}. Top plan items: {top}."}], role="worker", max_tokens=6000)
     text = res.text.strip()
     with session_scope() as s:
