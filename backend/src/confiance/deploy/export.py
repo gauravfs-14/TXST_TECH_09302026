@@ -1,5 +1,6 @@
 import difflib
 import json
+import shutil
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -12,6 +13,8 @@ class ExportDeployer(Deployer):
 
     def deploy(self, changes: list[Change], *, label: str, message: str, extras: dict[str, str] | None = None) -> DeployResult:
         root = (Path(self.config.get("out_dir", "./data/exports")) / label).resolve()
+        if root.exists():
+            shutil.rmtree(root)  # a re-export must not carry stale files from an earlier package with the same label
         root.mkdir(parents=True, exist_ok=True)
         manifest = []
         for c in changes:

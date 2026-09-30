@@ -381,7 +381,9 @@ def download(did: int):
         raise HTTPException(404, "There is no download for this change.")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for f in sorted(Path(ref).iterdir()):
-            z.write(f, f.name)
+        base = Path(ref)
+        for f in sorted(base.rglob("*")):
+            if f.is_file():  # include pages/, new-pages/ and site-files/, not just the top level
+                z.write(f, f.relative_to(base).as_posix())
     return Response(buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="changes-{did}.zip"'})

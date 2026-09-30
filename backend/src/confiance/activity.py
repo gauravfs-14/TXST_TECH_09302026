@@ -139,6 +139,9 @@ def set_stage(run_id: int, stage: str, total: int = 0) -> None:
     with _lock:
         live = _get(run_id)
         live.stage, live.stage_done, live.stage_total = stage, 0, total
+        if stage != "loop":  # leaving the improvement loop: don't keep showing its loop counter in later steps
+            live.loop_n = live.loop_max = 0
+            live.loop_phase = ""
         live.stage_started = live.last_event = time.monotonic()
 
 
