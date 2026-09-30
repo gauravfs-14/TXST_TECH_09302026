@@ -23,24 +23,27 @@ function Track({ on, onChange, icon, title, summary, children }: { on: boolean; 
 }
 
 /** When there are no products: the two ways forward, right where the person is looking. */
-function FindProducts({ project, go, onAdded }: { project: any; go: Go; onAdded: () => void }) {
+function FindProducts({ project, onManage, onAdded }: { project: any; onManage: () => void; onAdded: () => void }) {
   return (<div><p className="mb-3 text-sm">We haven't found any products on your site, and product questions need at least one to ask about. If you don't sell anything (a blog or tutorial site, say), just switch this off. Otherwise:</p>
-    <SuggestProducts project={project} onAdded={onAdded} extra={<Button kind="quiet" onClick={() => go("products")}><Icon n="plus" size={16} />Add one myself</Button>} /></div>);
+    <SuggestProducts project={project} onAdded={onAdded} extra={<Button kind="quiet" onClick={onManage}><Icon n="plus" size={16} />Add one myself</Button>} /></div>);
 }
 
-function Start({ project, go, onStarted }: { project: any; go: Go; onStarted: (id: number) => void }) {
+/** What someone had chosen before stepping out to Products, handed back on return so nothing is lost. */
+type Draft = { cfg: LoopCfg; qs: string[]; dirty: boolean };
+
+function Start({ project, go, draft, onStarted }: { project: any; go: Go; draft?: Draft; onStarted: (id: number) => void }) {
   const st = useApi<any>(`/projects/${project.id}/settings`);
   const brief = useApi<any>(`/projects/${project.id}/simple-brief`);
   const prods = useApi<any[]>(`/projects/${project.id}/products`);
-  const [cfg, setCfg] = useState<LoopCfg | null>(null);
-  const [qs, setQs] = useState<string[] | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const [cfg, setCfg] = useState<LoopCfg | null>(draft?.cfg ?? null);
+  const [qs, setQs] = useState<string[] | null>(draft?.qs ?? null);
+  const [dirty, setDirty] = useState(draft?.dirty ?? false);
   const [step, setStep] = useState(0);
   const [tune, setTune] = useState(false);
   const [editQs, setEditQs] = useState(false);
   useEffect(() => { if (st.data && !cfg) setCfg(st.data.settings); }, [st.data]);
   // With no products yet, product questions start switched off (brand questions still work); switching them on shows how to add products.
-  const tidied = useRef(false);
+  const tidied = useRef(!!draft); // a returning draft already reflects what the person chose
   useEffect(() => { if (cfg && prods.data && !tidied.current) { tidied.current = true; if (!prods.data.some(p => p.active) && cfg.track.includes("brand")) setCfg({ ...cfg, track: cfg.track.filter(x => x !== "products") }); } }, [cfg, prods.data]);
   useEffect(() => { if (brief.data && qs === null) setQs(brief.data.questions?.length ? brief.data.questions : [""]); }, [brief.data]);
   const est = useApi<any>(cfg ? `/projects/${project.id}/plans?loops=${cfg.max_loops}&track=${cfg.track.join(",")}` : null);
@@ -65,6 +68,7 @@ function Start({ project, go, onStarted }: { project: any; go: Go; onStarted: (i
   const plans: any[] = est.data?.plans ?? [];
   const chosen = plans.find(p => p.id === cfg.plan);
   const up = (k: Partial<LoopCfg>) => setCfg({ ...cfg, ...k });
+  const manage = () => go("products", { from: "optimize", draft: { cfg, qs, dirty } });
 
   const next = () => go2.run(async () => {
     if (step === 0 && brand && dirty) { await api(`/projects/${project.id}/questions`, "PUT", { questions: okQs }); setDirty(false); setQs(okQs); }
@@ -89,11 +93,11 @@ function Start({ project, go, onStarted }: { project: any; go: Go; onStarted: (i
             {okQs.length > 3 && <p className="mb-2 text-sm text-muted-foreground">…and {okQs.length - 3} more.</p>}
             <Button kind="quiet" size="small" onClick={() => setEditQs(true)}><Icon n="edit" size={14} />Review or edit questions</Button></>}</Track>
         <Track on={products} onChange={v => flip("products", v)} icon="tag" title="Product questions" summary={active.length ? `${active.length} product${active.length === 1 ? "" : "s"}${nQ ? ` · ${nQ} shopper questions ready` : ""}` : "No products yet. Switch on to add some"}>
-          {active.length === 0 ? <FindProducts project={project} go={go} onAdded={prods.reload} /> : <div>
+          {active.length === 0 ? <FindProducts project={project} onManage={manage} onAdded={prods.reload} /> : <div>
             {gen.busy && <p className="mb-2 text-sm text-muted-foreground">Writing shopper questions for your products…</p>}
             <ul className="m-0 mb-2.5 list-none p-0">{active.slice(0, 6).map(p => <li key={p.id} className="border-t py-1.5 text-sm first:border-t-0"><b>{p.name}</b>{p.queries?.length > 0 && <span className="text-muted-foreground"> · e.g. “{p.queries[p.queries.length > 2 ? 2 : 0].text}”</span>}</li>)}</ul>
             {active.length > 6 && <p className="text-sm text-muted-foreground">…and {active.length - 6} more.</p>}
-            <Button kind="text" size="small" onClick={() => go("products")}>Manage products <Icon n="arrow" size={14} /></Button></div>}
+            <Button kind="text" size="small" onClick={manage}>Manage products <Icon n="arrow" size={14} /></Button></div>}
           <TaskFeed task={gen.key} on={gen.busy} title="Writing shopper questions" /></Track></div>
       {problem && <div className="mt-4"><Banner kind="warn">{problem}</Banner></div>}
       {brand && products && active.length === 0 && !problem && <div className="mt-4"><Banner kind="info">Product questions will be skipped until you add a product. Brand questions still run.</Banner></div>}
@@ -140,7 +144,7 @@ export default function Optimize({ project, ctx, go }: { project: any; ctx: any;
     <PageHead title="Optimize" sub={sel != null ? "Follow a round, review what it found, and decide what goes ahead." : "Test how assistants answer, draft improvements, and check they work, all before you change anything."}
       actions={sel != null && <Button kind="quiet" onClick={() => { setSel(null); setFresh(true); }}>← All rounds</Button>} />
     {!runs.data ? <Skeleton h={300} /> : sel != null ? <RunView key={sel} runId={sel} go={go} /> : (<div className="space-y-4">
-      {working ? <Banner kind="clay">A round is already running. <Button kind="text" size="small" onClick={() => setSel(list.find(isWorking)!.id)}>Watch it →</Button></Banner> : <Start project={project} go={go} onStarted={id => { setSel(id); runs.reload(); }} />}
+      {working ? <Banner kind="clay">A round is already running. <Button kind="text" size="small" onClick={() => setSel(list.find(isWorking)!.id)}>Watch it →</Button></Banner> : <Start project={project} go={go} draft={ctx?.draft} onStarted={id => { setSel(id); runs.reload(); }} />}
       {list.length > 0 && <Card title="Earlier rounds">{list.map((r, i) => (<button key={r.id} className={cn("row w-full justify-between py-3 text-left hover:bg-accent/40", i > 0 && "border-t")} onClick={() => setSel(r.id)}>
         <span><b>Round {r.iteration}</b><span className="text-sm text-muted-foreground"> · {ago(r.created_at)}</span></span>
         <span className="row">{r.summary?.evaluation?.verdict && <Badge tone={VERDICT[r.summary.evaluation.verdict.label]?.tone}>{VERDICT[r.summary.evaluation.verdict.label]?.label}</Badge>}<Badge tone={r.status === "failed" ? "bad" : undefined}>{status(r)}</Badge><Icon n="arrow" size={16} /></span></button>))}</Card>}

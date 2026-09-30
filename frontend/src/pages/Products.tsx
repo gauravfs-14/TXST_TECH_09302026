@@ -21,7 +21,7 @@ function Form({ init, onSave, onCancel }: { init: any; onSave: (v: any) => Promi
     {error && <Banner kind="bad">{error}</Banner>}<div className="row"><Button busy={busy} disabled={!v.name.trim()} onClick={() => run(() => onSave(v))}>Save</Button><Button kind="text" onClick={onCancel}>Cancel</Button></div></div>);
 }
 
-export default function Products({ project, go }: { project: any; go: Go }) {
+export default function Products({ project, ctx, go }: { project: any; ctx: any; go: Go }) {
   const p = useApi<any[]>(`/projects/${project.id}/products`);
   const [edit, setEdit] = useState<any | null | false>(false);
   const [imp, setImp] = useState(false);
@@ -36,6 +36,7 @@ export default function Products({ project, go }: { project: any; go: Go }) {
   const changed = () => { reload(); write(); };
   return (<div className="page">
     <PageHead title="Products" sub="Track how shoppers' questions rank each product, separately from your brand. Shopper questions are written for you automatically." actions={<>
+      {ctx?.from === "optimize" && <Button kind="quiet" onClick={() => go("optimize", { draft: ctx.draft })}>← Back to Optimize</Button>}
       <Button onClick={() => setEdit(null)}><Icon n="plus" size={16} />Add a product</Button>
       <DropdownMenu><DropdownMenuTrigger asChild><Button kind="quiet"><Icon n="more" size={16} />More<Icon n="down" size={14} /></Button></DropdownMenuTrigger>
         <DropdownMenuContent><DropdownMenuItem onSelect={() => setFind(true)}><Icon n="spark" size={16} />Suggest from my website</DropdownMenuItem>
