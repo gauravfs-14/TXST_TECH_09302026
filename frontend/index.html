@@ -3,11 +3,9 @@
 <link rel="icon" type="image/png" href="/logo-mark.png" />
 <meta name="description" content="Confiance helps businesses show up correctly in AI assistant answers." />
 <script>
-  // Landing theme (night by default, sunny if chosen). The dashboard has its own theming.
-  if (!/^\/dashboard(\/|$)/.test(location.pathname)) {
-    document.documentElement.dataset.theme = "dark";
-    try { if (localStorage.getItem("confiance-theme-v2") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}
-  }
+  // One theme for the landing site and the dashboard: night by default, sunny if chosen.
+  document.documentElement.dataset.theme = "dark";
+  try { if (localStorage.getItem("confiance-theme-v2") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />

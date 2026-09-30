@@ -9,7 +9,7 @@ export function Welcome({ status, onReady }: { status: Record<string, boolean>; 
   useEffect(() => { load(); }, []);
   return (<div className="narrow space-y-3.5">
     <div className="text-center mt-4 mb-8">
-      <span className="inline-block text-primary"><Icon n="leaf" size={44} /></span>
+      <a href="/" aria-label="Confiance home page" className="inline-block rounded-lg"><img src="/logo-mark.png" alt="Confiance" width={323} height={229} className="mx-auto h-20 w-auto" /></a>
       <h1 className="mt-2">Welcome to Confiance</h1>
       <p className="text-muted-foreground text-lg">People now ask AI assistants like ChatGPT for advice instead of searching Google.
         Confiance helps those assistants find your business and describe it accurately.</p>

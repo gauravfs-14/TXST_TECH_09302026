@@ -1,70 +1,77 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* Dark mode follows the operating system, as before. */
-@custom-variant dark (@media (prefers-color-scheme: dark));
+/* Dark mode follows the landing site's theme choice (<html data-theme>), shared
+   through the same saved setting, so the dashboard opens in the sky you picked. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* ============ shadcn/ui theme: the earthy Confiance palette (no purple or blue-violet anywhere) ============ */
+/* ============ shadcn/ui theme: the landing palette (see landing/index.css) ============
+   Light is warm golden cream, dark is deep night navy. Logo red fills buttons and
+   marks what is chosen; warm orange/peach carries highlights. Teal only means
+   "right / done". */
 :root {
   --radius: 0.75rem;
-  --background: #f4efe6;
-  --foreground: #2e2a25;
-  --card: #fcfaf5;
-  --card-foreground: #2e2a25;
-  --popover: #fcfaf5;
-  --popover-foreground: #2e2a25;
-  --primary: #566f4f;
-  --primary-foreground: #fdfbf6;
-  --secondary: #ece5d8;
-  --secondary-foreground: #2e2a25;
-  --muted: #f0e9dc;
-  --muted-foreground: #776d60;
-  --accent: #e9e1d0;
-  --accent-foreground: #2e2a25;
-  --destructive: #a3453a;
-  --border: #e0d7c6;
-  --input: #cfc4af;
-  --ring: #566f4f;
-  --chart-1: #566f4f; --chart-2: #a9623f; --chart-3: #8a6a24; --chart-4: #a3453a; --chart-5: #a49a8b;
+  --background: #f8ecd6;
+  --foreground: #2a1d16;
+  --card: #fffaf0;
+  --card-foreground: #2a1d16;
+  --popover: #fffaf0;
+  --popover-foreground: #2a1d16;
+  --primary: #c41e3a; /* logo red */
+  --primary-foreground: #ffffff;
+  --secondary: #f3e3c6;
+  --secondary-foreground: #2a1d16;
+  --muted: #f3e3c6;
+  --muted-foreground: #6a5541;
+  --accent: #f6e3d8; /* warm peach */
+  --accent-foreground: #2a1d16;
+  --destructive: #c41e3a;
+  --border: #e8d2ad;
+  --input: #d9bf95;
+  --ring: #c41e3a;
+  --chart-1: #c41e3a; --chart-2: #8a3e1e; --chart-3: #8a5a12; --chart-4: #0f6b63; --chart-5: #a8957a;
   /* extra semantic tokens */
-  --success: #566f4f; --success-soft: #e3e9dc;
-  --warning: #8a6a24; --warning-soft: #f3e8cf;
-  --clay: #a9623f; --clay-soft: #f1e0d4;
-  --danger-soft: #f2dcd7;
-  --faint: #a49a8b;
+  --success: #0f6b63; --success-soft: #e3f0ed;
+  --warning: #8a5a12; --warning-soft: #f6e7c8;
+  --clay: #8a3e1e; --clay-soft: #f6e3d8;
+  --danger-soft: #fbe6e9;
+  --faint: #7d6850;
+  --brand: #c41e3a; /* logo red */
+  color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #1c1915;
-    --foreground: #ece5d8;
-    --card: #26221d;
-    --card-foreground: #ece5d8;
-    --popover: #26221d;
-    --popover-foreground: #ece5d8;
-    --primary: #93b08a;
-    --primary-foreground: #1b2418;
-    --secondary: #2d2822;
-    --secondary-foreground: #ece5d8;
-    --muted: #201d18;
-    --muted-foreground: #a79d8d;
-    --accent: #38322a;
-    --accent-foreground: #ece5d8;
-    --destructive: #e0877a;
-    --border: #38322a;
-    --input: #4a4237;
-    --ring: #93b08a;
-    --chart-1: #93b08a; --chart-2: #d59169; --chart-3: #d6b25e; --chart-4: #e0877a; --chart-5: #7d7466;
-    --success: #93b08a; --success-soft: #2c3628;
-    --warning: #d6b25e; --warning-soft: #38301c;
-    --clay: #d59169; --clay-soft: #3a2a20;
-    --danger-soft: #3b2622;
-    --faint: #7d7466;
-  }
+:root[data-theme="dark"] {
+  --background: #0c0c14;
+  --foreground: #f4f1ea;
+  --card: #16151f;
+  --card-foreground: #f4f1ea;
+  --popover: #16151f;
+  --popover-foreground: #f4f1ea;
+  --primary: #ef6a80; /* logo red, lifted for contrast on dark */
+  --primary-foreground: #0c0c14;
+  --secondary: #1f1d2a;
+  --secondary-foreground: #f4f1ea;
+  --muted: #1f1d2a;
+  --muted-foreground: #adaab8;
+  --accent: #2a1f24; /* warm peach glow on navy */
+  --accent-foreground: #f4f1ea;
+  --destructive: #ef6a80;
+  --border: #2b2837;
+  --input: #3a3648;
+  --ring: #ef6a80;
+  --chart-1: #ef6a80; --chart-2: #f2b8a0; --chart-3: #e6b85c; --chart-4: #7fc7bd; --chart-5: #7d7a8c;
+  --success: #7fc7bd; --success-soft: #1a2a2c;
+  --warning: #e6b85c; --warning-soft: #2a2418;
+  --clay: #f2b8a0; --clay-soft: #2a1f1f;
+  --danger-soft: #2c1620;
+  --faint: #8a8799;
+  --brand: #ef6a80; /* logo red, lifted for contrast on dark */
+  color-scheme: dark;
 }
 
 @theme inline {
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  /* Public Sans throughout, like the landing site; headings share the body face. */
+  --font-sans: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -94,6 +101,7 @@
   --color-clay: var(--clay); --color-clay-soft: var(--clay-soft);
   --color-danger-soft: var(--danger-soft);
   --color-faint: var(--faint);
+  --color-brand: var(--brand);
 }
 
 /* ============ Base ============ */
@@ -101,14 +109,14 @@
   * { @apply border-border outline-ring/50; }
   html { scroll-behavior: smooth; }
   body { @apply bg-background font-sans text-foreground antialiased; line-height: 1.55; overflow-y: scroll; }
-  h1, h2, h3, h4 { @apply font-serif font-semibold; line-height: 1.2; letter-spacing: -0.01em; }
+  h1, h2, h3, h4 { @apply font-serif font-semibold; line-height: 1.2; letter-spacing: -0.02em; }
   h1 { font-size: clamp(1.6rem, 3.4vw, 2.1rem); }
   h2 { font-size: 1.25rem; } h3 { font-size: 1.05rem; } h4 { font-size: 0.95rem; }
   p { margin: 0 0 0.75rem; }
   a:not([data-slot]) { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
   code, pre { @apply font-mono; }
   button:not(:disabled), [role="button"]:not(:disabled), [role="tab"], select { cursor: pointer; }
-  ::selection { background: var(--success-soft); }
+  ::selection { background: var(--clay-soft); }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 
