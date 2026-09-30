@@ -1,0 +1,33 @@
+[project]
+name = "confiance"
+version = "0.1.0"
+description = "CONFIANCE - agentic Generative Engine Optimization platform"
+readme = "README.md"
+authors = [
+    { name = "Gaurab Chhetri", email = "contact@gaurabchhetri.com.np" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "anthropic>=1.9.0",
+    "apscheduler>=3.11.3",
+    "beautifulsoup4>=4.15.0",
+    "ddgs>=9.16.0",
+    "fastapi>=0.142.0",
+    "google-genai>=2.25.0",
+    "httpx>=0.28.1",
+    "jsonschema>=4.26.0",
+    "openai>=3.22.0",
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy>=2.1.1",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.15,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-timeout>=2.4.0",
+]
