@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { pct } from "../copy";
-import { Banner, Button, Icon, Meter, useAction, usePoll } from "../ui";
+import { Banner, Button, Choice, Icon, Meter, useAction, usePoll } from "../ui";
 import { Progress } from "./Improvements";
 
 const HOW = [
@@ -14,6 +14,9 @@ export function Home({ project, onReview, alertsCount, goto }: { project: any; o
   const [runs, setRuns] = useState<any[] | null>(null);
   const [sum, setSum] = useState<any>(null);
   const { busy, error, run } = useAction();
+  const [plans, setPlans] = useState<any>(null);
+  const [plan, setPlan] = useState("quick");
+  useEffect(() => { api(`/projects/${project.id}/plans`).then(setPlans).catch(() => {}); }, [project.id]);
   const load = async () => {
     const r: any[] = await api(`/projects/${project.id}/runs`);
     setRuns(r);
@@ -24,7 +27,7 @@ export function Home({ project, onReview, alertsCount, goto }: { project: any; o
   const working = latest && (latest.status === "running" || latest.status === "pending");
   usePoll(load, 4000, !!working);
 
-  const start = () => run(async () => { const r = await api(`/projects/${project.id}/runs`, "POST"); await load(); return r; });
+  const start = () => run(async () => { const r = await api(`/projects/${project.id}/runs`, "POST", { intensity: plan }); await load(); return r; });
   const needsReview = latest?.stage === "awaiting_approval" && latest.status === "waiting";
   const needsLive = latest?.stage === "awaiting_live";
 
@@ -35,7 +38,7 @@ export function Home({ project, onReview, alertsCount, goto }: { project: any; o
     {alertsCount > 0 && <Banner kind="warn"><b>Something changed with an AI assistant.</b> <button className="btn text small" onClick={() => goto("settings")}>See what changed</button></Banner>}
     {error && <Banner kind="bad">{error}</Banner>}
 
-    {working && <Progress stage={latest.stage} />}
+    {working && <Progress runId={latest.id} stage={latest.stage} onChange={load} />}
 
     {needsReview && <div className="card hero"><h2>Your improvements are ready to review</h2>
       <p className="muted">We tested them in a practice round. Take a look, and choose what goes ahead.</p>
@@ -48,10 +51,18 @@ export function Home({ project, onReview, alertsCount, goto }: { project: any; o
     {latest?.status === "failed" && <div className="card"><Banner kind="bad"><b>The last round hit a problem.</b><br />{latest.error}</Banner>
       <Button onClick={() => onReview(latest.id)}>See details</Button></div>}
 
-    {!working && !needsReview && !needsLive && (<div className="card hero">
-      <h2>{latest ? "Ready for another round?" : "Ready to find improvements?"}</h2>
-      <p className="muted">{latest ? "Each round learns from the last one. It takes about 10 minutes and costs a small amount of AI usage." : "We'll ask AI assistants your customers' questions, then suggest safe changes to your website. It takes about 10 minutes, and nothing changes without your approval."}</p>
-      <Button size="big" busy={busy} onClick={start}><Icon n="spark" />Find improvements</Button></div>)}
+    {!working && (<div className={`card ${needsReview || needsLive ? "" : "hero"}`}>
+      <h2>{needsReview || needsLive ? "Want to start over?" : latest ? "Ready for another round?" : "Ready to find improvements?"}</h2>
+      <p className="muted">{needsReview ? "Starting a new round replaces the one waiting for your review; its suggestions are discarded. Nothing on your website changes."
+        : needsLive ? "A new round starts from your pages as they are now. The changes you're waiting to publish stay as they are."
+        : latest ? "Each round learns from the last one. It takes about 10 minutes and costs a small amount of AI usage." : "We'll ask AI assistants your customers' questions, then suggest safe changes to your website. It takes about 10 minutes, and nothing changes without your approval."}</p>
+      {plans && (<div style={{ margin: "1.25rem 0" }}>
+        <b>How thorough should this round be?</b>
+        <div className="stack" style={{ marginTop: ".6rem" }}>{plans.plans.map((p: any) => (
+          <Choice key={p.id} icon="chat" title={`${p.label} · about ${p.now} AI requests`} text={p.blurb} on={plan === p.id} onClick={() => setPlan(p.id)} />))}</div>
+        <p className="muted small" style={{ marginTop: ".6rem" }}>Free AI services allow only a limited number of requests a day, so start small. A smaller follow-up check runs after you publish (about {plans.plans.find((p: any) => p.id === plan)?.later} more). You've used about {plans.used_24h} in the last 24 hours.</p>
+      </div>)}
+      <Button size="big" kind={needsReview || needsLive ? "quiet" : "primary"} busy={busy} onClick={start}><Icon n="spark" />{needsReview || needsLive ? "Start a new round" : "Find improvements"}</Button></div>)}
 
     {sum?.before && (<div className="card">
       <h2>How AI assistants talk about you</h2>

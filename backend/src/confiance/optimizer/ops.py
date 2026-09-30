@@ -19,9 +19,27 @@ Examples of the ops array for propose_change:
   {"type": "append_section", "html": "<section><h2>Heading</h2><p>Text.</p></section>"}
   {"type": "insert_after", "selector": "h1", "html": "<p>One new paragraph.</p>"}
   {"type": "replace_block", "selector": "p.intro", "html": "<p>The reworded paragraph.</p>"}
-  {"type": "add_jsonld", "json": {"@context": "https://schema.org", "@type": "LocalBusiness", "name": "..."}}
+  {"type": "add_jsonld", "json": "{\"@context\": \"https://schema.org\", \"@type\": \"LocalBusiness\", \"name\": \"...\"}"}
 Guidance: prefer ADDING (add_faq, append_section, set_meta_description, add_jsonld). Use replace_block only for ONE
 small element, never for the whole page or the <main> element: rewriting most of a page is rejected."""
+
+
+# Tool-call schema for one edit. Every field is listed (some providers, e.g. Gemini, reject objects with no
+# declared properties); which fields are required depends on "type" and is validated in apply_ops.
+OP_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "type": {"type": "string", "enum": sorted(OP_TYPES)},
+        "text": {"type": "string", "description": "set_title: the new title"},
+        "content": {"type": "string", "description": "set_meta_description: the new description"},
+        "json": {"type": "string", "description": "add_jsonld: the schema.org object, as a JSON string"},
+        "items": {"type": "array", "description": "add_faq: the questions and answers",
+                  "items": {"type": "object", "properties": {"q": {"type": "string"}, "a": {"type": "string"}}, "required": ["q", "a"]}},
+        "selector": {"type": "string", "description": "insert_after / replace_block / append_section: CSS selector"},
+        "html": {"type": "string", "description": "insert_after / replace_block / append_section: the HTML to add"},
+    },
+    "required": ["type"],
+}
 
 
 class OpError(ValueError):

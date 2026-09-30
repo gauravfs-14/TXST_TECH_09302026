@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_worker_model: str = ""  # optional cheaper model for simple jobs; defaults to llm_model
     llm_timeout_s: float = 300.0  # max silence between streamed chunks
+    llm_max_concurrency: int = 4  # simultaneous AI calls (free tiers and local GPUs want this low)
+    llm_rpm: int = 0  # max AI calls per minute; 0 = no client-side limit (retries still back off on 429)
+    llm_reasoning_effort: str = ""  # "" = provider default. We never turn thinking down on our own.
 
     # Defaults for optional extra engine adapters (claude, gemini). The "openai" engine uses llm_model.
     engine_models: dict[str, str] = {
@@ -40,7 +43,7 @@ class Settings(BaseSettings):
     samples_per_question: int = 3
     max_engine_steps: int = 6
     max_parallel_calls: int = 6
-    use_llm_judge: bool = True
+    use_llm_judge: bool = False  # extra AI call per answer; off by default to save quota (deterministic metrics stay on)
 
     # Drift monitor
     drift_interval_minutes: int = 24 * 60

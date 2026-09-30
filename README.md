@@ -29,15 +29,23 @@ assistant that gets tested:
 
 | Provider | Address | Key |
 |---|---|---|
+| Google Gemini (free tier) | `https://generativelanguage.googleapis.com/v1beta/openai/` | yes, free at aistudio.google.com/apikey |
 | Ollama (free, local) | `http://localhost:11434/v1` | none |
 | OpenAI | `https://api.openai.com/v1` | yes |
 | OpenRouter, Groq, LM Studio, vLLM, ... | their `/v1` address | usually |
+
+While a round runs, the app shows a real progress bar, a heartbeat (time since last activity), the current speed, and a live feed
+of what is being asked, searched, read and proposed. Speed adapts to the service's limits (see the doc below).
+
+Two model roles: a **main** model for the hard, occasional work and an optional **fast** model for the many small jobs
+(the app suggests both for Gemini). Run size (Quick / Standard / Thorough) is chosen per round and shows an estimate of AI
+requests, because free tiers allow few. Details and sources: [docs/free-tier-research.md](docs/free-tier-research.md).
 
 Pick a model that supports **tool calling** (the connection test checks this). Web search defaults to free
 DuckDuckGo, so a local model plus free search costs nothing. Tavily, Brave and self-hosted SearXNG are also supported.
 Why built-in provider search is not used for experiments: [docs/search-integration-research.md](docs/search-integration-research.md).
 
-Developers: `cd backend && uv run pytest` (25 tests, no network or keys). `backend/scripts/seed_demo.py` fills a
+Developers: `cd backend && uv run pytest` (67 tests, no network or keys). `backend/scripts/seed_demo.py` fills a
 throwaway database with a scripted practice round (fake data) so the app can be explored with nothing connected.
 Advanced settings are `CONFIANCE_*` env vars (`backend/src/confiance/config.py`).
 
@@ -91,9 +99,11 @@ Baselines only move when a human accepts them. Alerts go to the UI, Slack and em
 
 ## Known limitations (be aware before relying on it)
 
-1. **The sandbox measures content effects, not ranking effects.** We do not alter which pages the search
-   API returns, so changes that would only help by ranking higher are invisible until the live measurement.
-   Sandbox results are directional evidence; the post-deploy measurement is ground truth.
+1. **The sandbox measures content effects, not ranking effects.** Findability (is the site in real search results?) is
+   checked and reported separately and never simulated. The practice test guarantees your page is among the results in
+   both rounds, so it measures how well the page works when found. See
+   [docs/measuring-improvement.md](docs/measuring-improvement.md). Only the post-publish check is real evidence of
+   ranking changes.
 2. **API != consumer app.** Engines are tested through provider APIs; answers in chatgpt.com or AI Overviews can
    differ, and a small local model is not ChatGPT: results with Ollama show the *mechanics* work, not how a
    particular commercial assistant will behave. Google AI Overviews has no API and is not covered.

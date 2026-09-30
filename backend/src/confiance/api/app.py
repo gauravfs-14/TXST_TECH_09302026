@@ -23,6 +23,7 @@ from .simple import router as simple_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    orchestrator.recover_interrupted()
     secrets_store.apply()
     sched = None
     if get_settings().enable_scheduler:
@@ -200,14 +201,38 @@ def _advance_bg(run_id: int) -> None:
         pass  # recorded on the run and audit log
 
 
+class RunIn(BaseModel):
+    intensity: str = "quick"
+
+
+@app.get("/api/projects/{pid}/plans")
+def run_plans(pid: int):
+    """The run sizes on offer, with an estimate of AI calls for this business's question list."""
+    from ..pipeline import plans
+    with session_scope() as s:
+        p = _404(s.get(Project, pid), "project")
+        n = len(briefs.get(s, pid)[1].target_questions) if p.current_brief_version else 0
+    return {"questions": n, "used_24h": __import__("confiance.llm", fromlist=["x"]).calls_today(),
+            "plans": [{"id": k, "label": v["label"], "blurb": v["blurb"],
+                       **plans.estimate_calls(n, k, get_settings().use_llm_judge)} for k, v in plans.PLANS.items()]}
+
+
 @app.post("/api/projects/{pid}/runs")
-def start_run(pid: int, bg: BackgroundTasks):
+def start_run(pid: int, bg: BackgroundTasks, body: RunIn | None = None):
     try:
-        rid = orchestrator.start_run(pid)
+        rid = orchestrator.start_run(pid, (body.intensity if body else None))
     except orchestrator.PipelineError as e:
         raise HTTPException(409, str(e))
     bg.add_task(_advance_bg, rid)
     return {"run_id": rid}
+
+
+@app.post("/api/runs/{rid}/cancel")
+def cancel_run(rid: int):
+    try:
+        return {"result": orchestrator.cancel_run(rid)}
+    except orchestrator.PipelineError as e:
+        raise HTTPException(409, str(e))
 
 
 @app.post("/api/runs/{rid}/advance")
@@ -228,6 +253,15 @@ def get_run(rid: int):
     with session_scope():
         pass
     return orchestrator.get_status(rid)
+
+
+@app.get("/api/runs/{rid}/live")
+def run_live(rid: int, after: int = 0):
+    """Progress and a feed of what is happening now. Poll with ?after=<last_seq> to receive only new events."""
+    from .. import activity
+    status = orchestrator.get_status(rid)
+    from .. import llm
+    return {"stage": status["stage"], "status": status["status"], "pace": llm.pace(), **activity.snapshot(rid, after)}
 
 
 @app.get("/api/runs/{rid}/proposals")

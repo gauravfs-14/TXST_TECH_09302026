@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from .. import llm
 from ..engines.base import _URL, EngineAnswer
-from ..textutil import domain_of, same_site
+from ..textutil import domain_of, same_site, shingles
 
 JUDGE_SCHEMA = {
     "type": "object",
@@ -31,7 +31,8 @@ class Target:
         return re.compile("|".join(rf"(?<!\w){re.escape(a)}(?!\w)" for a in names), re.I) if names else re.compile(r"$^")
 
 
-def score(ans: EngineAnswer, t: Target, *, kb_card: str = "", prompt: str = "", judge: bool = False) -> dict:
+def score(ans: EngineAnswer, t: Target, *, kb_card: str = "", prompt: str = "", judge: bool = False,
+          page_texts: list[str] | None = None) -> dict:
     text = ans.text or ""
     prose = _URL.sub(" ", text)  # a cited URL is a citation, not a mention in the prose
     m = t.alias_re().search(prose)
@@ -51,7 +52,18 @@ def score(ans: EngineAnswer, t: Target, *, kb_card: str = "", prompt: str = "", 
         "competitors_cited": comp_cited,
         "n_citations": len(cites),
         "answer_chars": len(text),
+        "searched": bool(ans.queries),
+        "exposed": bool(getattr(ans, "exposed", False)) or retrieved,
     }
+    if page_texts is not None:
+        # Did the answer draw on the client's page? Share of the answer's 4-word phrases that appear on it.
+        # Far more sensitive than "was the brand named", which stays at 0 until everything else is right.
+        a = shingles(prose)
+        page = set().union(*[shingles(x) for x in page_texts]) if page_texts else set()
+        hit = len(a & page)
+        overlap = hit / max(len(a), 1)
+        metrics["page_overlap"] = round(overlap, 4)
+        metrics["used_page"] = bool(metrics["exposed"]) and hit >= 3 and overlap >= 0.03
     if judge and metrics["answered"]:
         try:
             j = llm.json_call(
@@ -67,13 +79,16 @@ def score(ans: EngineAnswer, t: Target, *, kb_card: str = "", prompt: str = "", 
 
 
 def visibility_score(m: dict) -> float:
-    """Single 0-1 number per answer, used for paired comparisons. Weights favour being cited/recommended
-    over merely appearing in text."""
+    """Single 0-1 number per answer, used for paired comparisons. Being cited or recommended counts most;
+    when page usage was measured, drawing on the page's content counts too."""
     if not m.get("answered"):
         return 0.0
-    v = 0.25 * m["mentioned"] + 0.40 * m["cited"] + 0.10 * m["retrieved"]
-    if m.get("recommended") is not None:
-        v += 0.25 * m["recommended"]
-    else:
-        v += 0.25 * (m["mentioned"] and m["cited"])
+    rec = m["recommended"] if m.get("recommended") is not None else bool(m["mentioned"] and m["cited"])
+    if "used_page" in m:
+        # Graded, not yes/no: 10% of the answer's phrases coming from the page counts as fully using it. Mentions and
+        # links saturate as soon as the page is in front of the assistant, so this is where gains show up first.
+        used = min(1.0, m.get("page_overlap", 0.0) / 0.10) if "page_overlap" in m else float(m["used_page"])
+        v = 0.20 * m["mentioned"] + 0.25 * m["cited"] + 0.20 * used + 0.10 * bool(m.get("exposed")) + 0.25 * rec
+    else:  # results stored before page usage was measured
+        v = 0.25 * m["mentioned"] + 0.40 * m["cited"] + 0.10 * m["retrieved"] + 0.25 * rec
     return min(v, 1.0)

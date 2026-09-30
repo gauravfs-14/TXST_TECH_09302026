@@ -61,3 +61,15 @@ def test_friendly_setup_flow():
         assert b["never_change"] == ["Visit fee: $89"]
         assert c.patch(f"/api/projects/{pid}", json={"ai_assistants": []}).status_code == 400
         assert c.post(f"/api/projects/{pid}/prepare").status_code == 409  # no AI model connected yet
+
+
+def test_gemini_model_suggestions_and_id_cleanup():
+    ids = ["embedding-001", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-3.8-flash", "gemini-3.8-flash-tts",
+           "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview", "gemini-3.8-live", "gemini-2.5-flash-image"]
+    assert secrets_store.suggest_models(ids) == {"main": "gemini-3.8-flash", "fast": "gemini-3.5-flash-lite"}
+    assert secrets_store.suggest_models(["llama3:8b", "qwen3"]) == {}
+
+
+def test_googles_bad_key_error_is_recognised():
+    google = Exception("Error code: 400 - {'error': {'code': 400, 'message': 'Please pass a valid API key', 'status': 'INVALID_ARGUMENT'}}")
+    assert "key was not accepted" in secrets_store._friendly(google, "https://generativelanguage.googleapis.com/v1beta/openai/")

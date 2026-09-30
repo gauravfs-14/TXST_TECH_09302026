@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import audit, snapshots
+from .. import activity, audit, snapshots
 from ..brief import BriefData
 from ..config import get_settings
 from ..context import submit
@@ -28,19 +28,20 @@ class PromptSet:
 
 
 def build_sandbox(s: Session, project: Project, overrides: dict[int, str] | None = None, *,
-                  provider=None, cache: SearchCache | None = None) -> Sandbox:
+                  provider=None, cache: SearchCache | None = None, expose: bool = False) -> Sandbox:
     overrides = overrides or {}
-    pages, modified = {}, set()
+    pages, modified, urls = {}, set(), {}
     for p in s.scalars(select(Page).where(Page.project_id == project.id)):
         html = overrides.get(p.id) or snapshots.live_content(s, p)
         if html is None:
             continue
         key = norm_url(p.url)
+        urls[key] = p.url
         pages[key] = html_to_text(html)
         if p.id in overrides:
             modified.add(key)
     return Sandbox(provider=provider or build_provider(), client_domain=project.domain, pages=pages,
-                   modified=modified, cache=cache or SearchCache())
+                   modified=modified, cache=cache or SearchCache(), urls=urls, expose=expose)
 
 
 def target_for(project: Project, brief: BriefData) -> Target:
@@ -49,7 +50,7 @@ def target_for(project: Project, brief: BriefData) -> Target:
 
 def run_batch(project: Project, brief: BriefData, run_id: int | None, arm: str, mode: str, prompts: PromptSet,
               *, sandbox: Sandbox | None, kb_card: str, samples: int | None = None,
-              engines: list[dict] | None = None, question_ids: list[str] | None = None) -> int:
+              engines: list[dict] | None = None, question_ids: list[str] | None = None, max_steps: int | None = None) -> int:
     cfg = get_settings()
     samples = samples or cfg.samples_per_question
     engines = engines or project.engines
@@ -66,21 +67,41 @@ def run_batch(project: Project, brief: BriefData, run_id: int | None, arm: str, 
                     tasks.append((eng, pid, qid, text, i))
 
     def work(eng: dict, pid, qid: str, text: str, i: int) -> dict:
-        engine = build_engine(eng["name"], eng.get("model"))
+        activity.check_cancelled()
+        engine = build_engine(eng["name"], eng.get("model"), max_steps)
         if mode == "real":
             ans = engine.run_real([Turn("user", text)])
         else:
             tools = sandbox.session() if mode == "controlled" and sandbox else None
             ans = engine.run(mode, [Turn("user", text)], tools)
-        m = score(ans, target, kb_card=kb_card, prompt=text, judge=cfg.use_llm_judge and not ans.error)
+        page_texts = [t for _, t in sandbox.pages.values()] if (sandbox is not None and mode == "controlled") else None
+        m = score(ans, target, kb_card=kb_card, prompt=text, judge=cfg.use_llm_judge and not ans.error, page_texts=page_texts)
         return {"engine": eng["name"], "persona_id": pid, "question_id": qid, "sample_idx": i, "prompt": text,
                 "ans": ans, "metrics": m, "score": visibility_score(m)}
 
+    label = {"baseline": "Round 1 of 2: asking with your website as it is today",
+             "candidate": "Round 2 of 2: asking again with the improvements in place",
+             "live_pre": "Checking today's real-world answers (before publishing)",
+             "live_post": "Checking real-world answers after publishing"}.get(arm, f"Asking ({arm})")
+    activity.set_total(len(tasks))
+    activity.emit(f"{label} ({len(tasks)} practice conversations)", "step")
     rows = []
     with ThreadPoolExecutor(cfg.max_parallel_calls) as pool:
         futs = [submit(pool, work, *t) for t in tasks]
         for f in as_completed(futs):
-            rows.append(f.result())
+            if activity.is_cancelled():
+                for x in futs:
+                    x.cancel()  # conversations not started yet never start
+            r = f.result()
+            rows.append(r)
+            activity.tick()
+            short = (r["prompt"][:70] + "…") if len(r["prompt"]) > 70 else r["prompt"]
+            if r["ans"].error:
+                activity.emit(f"Couldn't get an answer to “{short}”: {r['ans'].error[:120]}", "warn")
+            else:
+                m = r["metrics"]
+                activity.emit(f"Asked “{short}”. Mentions you: {'yes' if m.get('mentioned') else 'no'}, links to you: {'yes' if m.get('cited') else 'no'}", "ask",
+                              {"engine": r["engine"], "latency_ms": r["ans"].latency_ms})
 
     with session_scope() as s:
         batch = SimulationBatch(project_id=project.id, run_id=run_id, arm=arm, mode=mode)

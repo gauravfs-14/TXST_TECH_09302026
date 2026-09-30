@@ -95,3 +95,9 @@ def best_passage(text: str, query: str, size: int = 450) -> str:
         return ""
     top = BM25(ps).top(query, 1)
     return ps[top[0][0]] if top else ps[0]
+
+
+def shingles(text: str, n: int = 4) -> set[tuple[str, ...]]:
+    """Word n-grams, used to tell whether an answer is drawing on a page's wording."""
+    w = re.findall(r"[a-z0-9]+", text.lower())
+    return {tuple(w[i:i + n]) for i in range(max(len(w) - n + 1, 0))}

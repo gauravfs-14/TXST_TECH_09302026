@@ -3,6 +3,7 @@ applied to the process environment, and secrets are never returned by the API.""
 
 import json
 import os
+import re
 from pathlib import Path
 
 from .config import get_settings
@@ -11,6 +12,9 @@ from .config import get_settings
 FIELDS: dict[str, tuple[str, bool]] = {
     "llm_base_url": ("CONFIANCE_LLM_BASE_URL", False),
     "llm_model": ("CONFIANCE_LLM_MODEL", False),
+    "llm_worker_model": ("CONFIANCE_LLM_WORKER_MODEL", False),
+    "llm_rpm": ("CONFIANCE_LLM_RPM", False),
+    "llm_max_concurrency": ("CONFIANCE_LLM_MAX_CONCURRENCY", False),
     "llm_api_key": ("CONFIANCE_LLM_API_KEY", True),
     "search_provider": ("CONFIANCE_SEARCH_PROVIDER", False),
     "search_api_key": ("CONFIANCE_TAVILY_API_KEY", True),
@@ -60,6 +64,7 @@ def reset_clients() -> None:
 
     gs.cache_clear()
     llm.client.cache_clear()
+    llm.reset_pacing()
     for mod, attr in (("engines.openai_engine", "_client"),):
         try:
             import importlib
@@ -75,7 +80,8 @@ def is_local(url: str) -> bool:
 def public() -> dict:
     """Everything the web app may show. Secrets appear only as 'has_...' booleans."""
     s = get_settings()
-    return {"llm_base_url": s.llm_base_url, "llm_model": s.llm_model, "has_llm_key": bool(s.llm_api_key),
+    return {"llm_base_url": s.llm_base_url, "llm_model": s.llm_model, "llm_worker_model": s.llm_worker_model,
+            "llm_rpm": s.llm_rpm, "llm_max_concurrency": s.llm_max_concurrency, "has_llm_key": bool(s.llm_api_key),
             "search_provider": s.search_provider, "has_search_key": bool(s.tavily_api_key),
             "searxng_url": s.searxng_url or "", "local": is_local(s.llm_base_url)}
 
@@ -94,38 +100,71 @@ def _friendly(e: Exception, base_url: str) -> str:
     if "connection" in low or "connect" in low or "refused" in low or "timed out" in low:
         hint = " If this is Ollama, make sure it is running." if is_local(base_url) else " Please check the address."
         return f"We couldn't reach {base_url}.{hint}"
-    if "401" in msg or "403" in msg or "invalid api key" in low or "incorrect api key" in low or "unauthorized" in low:
+    if ("401" in msg or "403" in msg or "invalid api key" in low or "incorrect api key" in low or "unauthorized" in low
+            or "valid api key" in low or "api key not valid" in low or "api_key_invalid" in low or "permission_denied" in low):  # Google answers a bad key with HTTP 400
         return "That key was not accepted. Please check that you copied all of it."
+    if "429" in msg or "rate limit" in low or "resource_exhausted" in low or "quota" in low:
+        return "The service says you've used up its free allowance for now. Wait a minute and try again. If it keeps happening, the daily limit may be reached; it resets daily."
     if "404" in msg and "model" in low:
         return "That model wasn't found. Pick one from the list."
     return "Something went wrong: " + msg[:200]
+
+
+_GEMINI = re.compile(r"^gemini-(\d+(?:\.\d+)*)-(flash-lite|flash|pro)(?:-(.+))?$")
+_NOT_TEXT = ("image", "live", "tts", "audio", "transcribe", "embedding", "omni", "robotics", "computer", "veo", "imagen", "native")
+
+
+def suggest_models(ids: list[str]) -> dict[str, str]:
+    """Pick sensible defaults from a Gemini model list: the newest Flash for the hard jobs, the newest
+    Flash-Lite for the many small ones. Pro models are skipped (not on the free tier). Empty for other providers."""
+    best: dict[str, tuple[tuple, str]] = {}
+    for mid in ids:
+        m = _GEMINI.match(mid)
+        if not m or any(w in mid for w in _NOT_TEXT):
+            continue
+        version = tuple(int(x) for x in m.group(1).split("."))
+        stable = 0 if m.group(3) and "preview" in m.group(3) else 1  # prefer stable over preview at equal version
+        kind = m.group(2)
+        if kind == "pro":
+            continue
+        key = (version, stable, -len(mid))
+        if kind not in best or key > best[kind][0]:
+            best[kind] = (key, mid)
+    out = {}
+    if "flash" in best:
+        out["main"] = best["flash"][1]
+    if "flash-lite" in best:
+        out["fast"] = best["flash-lite"][1]
+    return out
 
 
 def list_models(base_url: str, api_key: str | None) -> tuple[list[str], str | None]:
     from openai import OpenAI
     try:
         c = OpenAI(base_url=base_url, api_key=api_key or "not-needed", max_retries=0, timeout=15)
-        ids = sorted({m.id for m in c.models.list()})
+        ids = sorted({m.id.removeprefix("models/") for m in c.models.list()})  # Gemini prefixes ids with "models/"
         return ids, None
     except Exception as e:
         return [], _friendly(e, base_url)
 
 
 def test_llm() -> dict:
-    """Live check of the saved connection: reachable, model answers, and can it call tools?"""
+    """Live check of the saved connection: reachable, each chosen model answers, and can it call tools?"""
     from openai import OpenAI
     s = get_settings()
     c = OpenAI(base_url=s.llm_base_url, api_key=s.llm_api_key or "not-needed", max_retries=0, timeout=180)
-    try:
-        r = c.chat.completions.create(model=s.llm_model, max_tokens=64, messages=[{"role": "user", "content": "Reply with the single word: ready"}])
-        if not (r.choices and r.choices[0].message is not None):
-            return {"ok": False, "message": "The model didn't answer."}
-    except Exception as e:
-        return {"ok": False, "message": _friendly(e, s.llm_base_url)}
+    models = [s.llm_model] + ([s.llm_worker_model] if s.llm_worker_model and s.llm_worker_model != s.llm_model else [])
+    for m in models:
+        try:
+            r = c.chat.completions.create(model=m, max_tokens=2000, messages=[{"role": "user", "content": "Reply with the single word: ready"}])
+            if not (r.choices and r.choices[0].message is not None):
+                return {"ok": False, "message": f"{m} didn't answer."}
+        except Exception as e:
+            return {"ok": False, "message": _friendly(e, s.llm_base_url)}
     tools_ok = False
     try:
         t = c.chat.completions.create(
-            model=s.llm_model, max_tokens=300,
+            model=s.llm_model, max_tokens=2000,
             messages=[{"role": "user", "content": "Use the tool to look up the number for 'blue'. Do not answer without calling it."}],
             tools=[{"type": "function", "function": {"name": "lookup_number", "description": "Look up a number for a word",
                                                      "parameters": {"type": "object", "properties": {"word": {"type": "string"}}, "required": ["word"]}}}])
@@ -133,8 +172,8 @@ def test_llm() -> dict:
     except Exception:
         tools_ok = False
     if not tools_ok:
-        return {"ok": True, "tools": False, "message": "It works, but this model doesn't seem able to use tools, which Confiance needs. Please pick a different model (for Ollama, look for one marked “tools”)."}
-    return {"ok": True, "tools": True, "message": "Connected, and this model can do everything Confiance needs."}
+        return {"ok": True, "tools": False, "message": "It works, but the main model doesn't seem able to use tools, which Confiance needs. Please pick a different main model (for Ollama, look for one marked “tools”)."}
+    return {"ok": True, "tools": True, "message": "Connected, and these models can do everything Confiance needs."}
 
 
 def test_search() -> dict:

@@ -16,6 +16,8 @@ from .. import audit, brief as briefs, kb, llm, secrets_store
 from ..brief import BriefData, Constraints, TargetQuestion
 from ..db import session_scope
 from ..models import Deployment, Page, Project, Run, SimulationBatch, SimulationResult
+from ..sim import stats
+from ..sim.runner import load_rows
 from ..textutil import domain_of
 
 router = APIRouter(prefix="/api")
@@ -42,6 +44,9 @@ def setup_config():
 class ConfigIn(BaseModel):
     llm_base_url: str | None = None
     llm_model: str | None = None
+    llm_worker_model: str | None = None  # the fast model for the many small jobs; empty = same as main
+    llm_rpm: int | None = None
+    llm_max_concurrency: int | None = None
     llm_api_key: str | None = None      # empty string clears it
     search_provider: str | None = None
     search_api_key: str | None = None
@@ -50,7 +55,7 @@ class ConfigIn(BaseModel):
 
 @router.put("/setup/config")
 def save_config(body: ConfigIn):
-    vals = {k: v for k, v in body.model_dump().items() if v is not None}
+    vals = {k: str(v) for k, v in body.model_dump().items() if v is not None}
     if vals.get("search_provider") not in (None, "duckduckgo", "tavily", "searxng", "brave"):
         raise HTTPException(400, "Unknown search option")
     secrets_store.save(vals)
@@ -67,7 +72,7 @@ class ModelsIn(BaseModel):
 def find_models(body: ModelsIn):
     """List the models a server offers, using values typed on screen (nothing is saved)."""
     ids, err = secrets_store.list_models(body.base_url.strip(), body.api_key.strip() or None)
-    return {"models": ids, "error": err}
+    return {"models": ids, "error": err, "suggested": secrets_store.suggest_models(ids)}
 
 
 @router.post("/setup/test-llm")
@@ -192,10 +197,14 @@ def suggest_questions(pid: int):
               "required": ["questions"], "additionalProperties": False}
     data = llm.json_call(
         "questions.suggest", system=llm.cached_system(card),
-        prompt=f"List 8 questions that real people might type into an AI assistant (like ChatGPT) when looking for what "
-               f"this business offers. Mix specific needs, local searches and comparisons. Write them the way a normal "
-               f"person would. Never include the business name ({name}) in a question.",
-        schema=schema, max_tokens=1200)
+        prompt=f"Write 8 questions that real people might type into an AI assistant (like ChatGPT) where this business could "
+               f"be the right answer. Make them a mix, and write them the way a normal person would:\n"
+               f"- 2 about the business by name (for example what {name} is, or whether it is good for something specific).\n"
+               f"- 4 SPECIFIC questions tied to concrete things on the website: particular topics, places, audiences, languages, "
+               f"tools or problems it covers. These are the questions a smaller site can realistically win.\n"
+               f"- 2 broader questions about the general subject.\n"
+               f"Do not make most of them broad: broad questions are dominated by huge sites. List the by-name questions first.",
+        schema=schema, max_tokens=8000)
     return {"questions": [q.strip() for q in data["questions"] if q.strip()][:8]}
 
 
@@ -247,7 +256,7 @@ def get_simple_brief(pid: int):
 # ---- results in plain terms -----------------------------------------------------------------------------------------
 def _overall(agg: dict) -> dict:
     o = (agg or {}).get("overall", {})
-    return {"mentioned": o.get("mentioned_rate", 0), "cited": o.get("cited_rate", 0), "n": o.get("n", 0)}
+    return {"mentioned": o.get("mentioned_rate", 0), "cited": o.get("cited_rate", 0), "used": o.get("used_page_rate", 0), "n": o.get("n", 0)}
 
 
 @router.get("/runs/{rid}/summary")
@@ -272,7 +281,9 @@ def run_summary(rid: int):
             q = ((b.aggregate or {}).get("by_question", {}).get(qid) if b else None) or {}
             return {"mentioned": q.get("mentioned_rate", 0), "cited": q.get("cited_rate", 0)}
 
+        cand_q = set(((batches["candidate"].aggregate or {}).get("by_question", {}))) if "candidate" in batches else None
         questions = [{"id": qid, "text": t, "before": rate("baseline", qid), "after": rate("candidate", qid),
+                      "retested": cand_q is None or qid in cand_q,
                       "before_answer": sample("baseline", qid), "after_answer": sample("candidate", qid)}
                      for qid, t in texts.items() if qid in ((batches.get("baseline").aggregate or {}).get("by_question", {})
                                                             if batches.get("baseline") else {})]
@@ -281,10 +292,14 @@ def run_summary(rid: int):
             d = s.get(Deployment, run.summary["deployment_id"])
             dep = {"id": d.id, "status": d.status, "how": d.deployer, "where": d.external_ref, "details": d.details}
         out = {"id": run.id, "stage": run.stage, "status": run.status, "error": run.error,
-               "before": _overall(batches["baseline"].aggregate) if "baseline" in batches else None,
+               # "before" covers the same questions that were re-asked, so before and after compare like with like
+               "before": (_overall(stats.aggregate([r for r in load_rows(s, batches["baseline"].id) if cand_q is None or r["question_id"] in cand_q]))
+                          if "baseline" in batches else None),
                "after": _overall(batches["candidate"].aggregate) if "candidate" in batches else None,
                "recommendation": (run.summary.get("evaluation") or {}).get("recommendation"),
                "questions": questions, "deployment": dep, "optimizer_summary": run.summary.get("optimizer_summary", ""),
+               "findability": run.summary.get("findability"), "findability_summary": run.summary.get("findability_summary"),
+               "recommendations": run.summary.get("recommendations", []),
                "live_before": _overall(batches["live_pre"].aggregate) if "live_pre" in batches else None,
                "live_after": _overall(batches["live_post"].aggregate) if "live_post" in batches else None,
                "measure_after": run.measure_after.isoformat() if run.measure_after else None}

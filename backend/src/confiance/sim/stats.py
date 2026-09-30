@@ -34,7 +34,7 @@ def aggregate(rows: list[dict]) -> dict:
         n = len(rs)
         sc = [r["score"] for r in rs]
         out = {"n": n, "visibility": round(mean(sc), 4), "visibility_ci": [round(x, 4) for x in bootstrap_ci(sc)]}
-        for key in ("mentioned", "cited", "retrieved"):
+        for key in ("mentioned", "cited", "retrieved", "used_page"):
             k = sum(1 for r in rs if r["metrics"].get(key))
             lo, hi = wilson(k, n)
             out[f"{key}_rate"] = round(k / n, 4) if n else 0.0

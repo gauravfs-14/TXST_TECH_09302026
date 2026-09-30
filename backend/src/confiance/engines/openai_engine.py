@@ -41,7 +41,12 @@ class OpenAIEngine(Engine):
         res = None
         for step in range(self.max_steps + 1):
             last = step == self.max_steps
-            res = llm.chat("engine:openai", messages, tools=None if last else specs, model=self.model, max_tokens=4000)
+            res = llm.chat("engine:openai", messages, tools=None if last else specs, model=self.model, role="engine", max_tokens=8000)
+            if not res.tool_calls and step == 0 and not last:
+                # Models often answer from memory. This assistant is meant to be search-enabled, so ask once.
+                messages.append(res.message)
+                messages.append({"role": "user", "content": "Please use the web_search tool first, then answer based on the results."})
+                continue
             if not res.tool_calls:
                 break
             messages.append(res.message)

@@ -1,17 +1,74 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { PROGRESS, describeOp, friendlyBlock, pageName, pct, progressIndex } from "../copy";
 import { Banner, Button, Icon, Meter, useAction, usePoll } from "../ui";
 
-export function Progress({ stage }: { stage: string }) {
-  const at = progressIndex(stage);
+const fmt = (sec: number | null | undefined) => {
+  if (sec == null) return "";
+  if (sec < 60) return `${sec} sec`;
+  const m = Math.floor(sec / 60);
+  return m < 60 ? `${m} min${sec % 60 >= 10 && m < 10 ? ` ${sec % 60} sec` : ""}` : `${Math.floor(m / 60)} h ${m % 60} min`;
+};
+const ICON: Record<string, string> = { ask: "✓", tool: "•", step: "▸", wait: "⏳", warn: "⚠", done: "✔", info: "·", llm: "·" };
+const clock = (ts: string) => new Date(ts + "Z").toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+/** What is happening right now: a real progress bar, a heartbeat, and a live feed. */
+export function Progress({ runId, stage, onChange }: { runId: number; stage: string; onChange?: () => void }) {
+  const [live, setLive] = useState<any>(null);
+  const [stopping, setStopping] = useState(false);
+  const stop = useAction();
+  const [events, setEvents] = useState<any[]>([]);
+  const [tech, setTech] = useState(false);
+  const [misses, setMisses] = useState(0);
+  const last = useRef(0);
+  usePoll(async () => {
+    try {
+      const j = await api(`/runs/${runId}/live?after=${last.current}`);
+      setLive(j); setMisses(j.known ? 0 : m => m + 1);
+      if (j.events?.length) { last.current = j.last_seq; setEvents(e => [...e, ...j.events].slice(-400)); }
+    } catch { /* keep the last picture; the next poll may work */ }
+  }, 1500);
+
+  const at = progressIndex(live?.stage ?? stage);
+  const known = live?.known;
+  const pct = known ? Math.round(live.pct) : null;
+  const shown = [...events].filter(e => tech || e.kind !== "llm").reverse().slice(0, 60);
+  const slow = known && live.idle_s > 180 && live.in_flight > 0;
+  const stuck = known && live.idle_s > 600;
   return (<div className="card hero">
-    <h2>We're working on it</h2>
-    <p className="muted">This usually takes 5 to 15 minutes. You can close this page and come back. We'll keep going.</p>
-    <ul className="timeline">
-      {PROGRESS.map((p, i) => (<li key={p.key} className={i < at ? "done" : i === at ? "now" : ""}>
-        <span className="bullet">{i < at ? <Icon n="check" size={14} /> : i === at ? <span className="spin" /> : ""}</span>
-        <span>{p.title}<br /><span className="muted small" style={{ fontWeight: 400 }}>{i === at ? p.detail : ""}</span></span></li>))}
+    <div className="row between"><h2 style={{ margin: 0 }}>We're working on it</h2>
+      {pct !== null && <span className="big-num" aria-label={`${pct} percent done`}>{pct}%</span>}</div>
+    <div style={{ margin: ".75rem 0" }}><Meter value={(pct ?? 3) / 100} after /></div>
+    <p style={{ margin: 0 }}><b>{PROGRESS[at].title}</b>{known && live.stage_total > 0 && at !== 4 ? ` · ${live.stage_done} of ${live.stage_total}` : ""}</p>
+    <p className="muted small" style={{ margin: ".25rem 0 .75rem" }}>{PROGRESS[at].detail}</p>
+
+    <div className="row small" style={{ gap: "1.25rem" }}>
+      {known && <span><span className={`pulse ${live.idle_s > 60 ? "slow" : ""}`} />{live.waiting ? `Slowing down on purpose (${live.waiting.seconds_left}s)` : live.in_flight > 0 ? `Waiting for the AI to answer${live.in_flight > 1 ? ` (${live.in_flight} at once)` : ""}` : "Working"} · last activity {live.idle_s < 5 ? "just now" : `${fmt(live.idle_s)} ago`}</span>}
+      {known && <span className="muted">Running for {fmt(live.elapsed_s)}{live.eta_s != null ? ` · roughly ${fmt(live.eta_s)} left` : ""}</span>}
+      {known && <span className="muted">{live.llm_calls} AI requests so far</span>}
+      {known && live.pace && <span className="muted" title="Confiance starts gently, speeds up while things go well, and slows down if the service pushes back.">Speed: {live.pace.concurrency} at once{live.pace.rpm ? `, up to ${live.pace.rpm} a minute` : ""}</span>}
+    </div>
+
+    {known && live.waiting && <Banner kind="clay"><b>{live.waiting.reason}</b> Free AI services allow only so many requests a minute, so Confiance is pausing for {live.waiting.seconds_left} seconds and then carries on. This is normal.</Banner>}
+    {slow && !live.waiting && !stuck && <Banner kind="info">The AI is taking a while to answer. Large models can be slow, and it's still working.</Banner>}
+    {stuck && <Banner kind="warn"><b>Nothing has happened for {fmt(live.idle_s)}.</b> If this doesn't change soon, close the app and start it again. Your progress is saved and it will pick up where it stopped.</Banner>}
+    {!known && misses >= 3 && <Banner kind="info">Live details aren't available for this round (the app may have been restarted), but the progress is saved.</Banner>}
+
+    <ul className="timeline" style={{ marginTop: "1rem" }}>
+      {PROGRESS.map((p, i) => (<li key={p.key} className={i < at ? "done" : i === at ? "now" : ""} style={{ padding: ".3rem 0" }}>
+        <span className="bullet">{i < at ? <Icon n="check" size={14} /> : i === at ? <span className="spin" /> : ""}</span><span>{p.title}</span></li>))}
+    </ul>
+
+    <div className="row" style={{ marginTop: "1rem" }}>
+      <Button kind="danger" size="small" busy={stop.busy} disabled={stopping} onClick={() => confirm("Stop this round? What has been done so far is kept, and you can start a new round any time.") && stop.run(async () => { await api(`/runs/${runId}/cancel`, "POST"); setStopping(true); onChange?.(); })}>{stopping ? "Stopping…" : "Stop this round"}</Button>
+      {stopping && <span className="muted small">It stops at the next step, usually within a minute.</span>}{stop.error && <span className="small" style={{ color: "var(--brick)" }}>{stop.error}</span>}
+    </div>
+    <div className="row between" style={{ marginTop: "1rem" }}><b>Live activity</b>
+      <label className="check small" style={{ padding: 0 }}><input type="checkbox" checked={tech} onChange={e => setTech(e.target.checked)} />Show technical details</label></div>
+    <ul className="feed" aria-live="polite">
+      {shown.length === 0 && <li className="muted">Waiting for the first update…</li>}
+      {shown.map(e => (<li key={e.seq} className={`k-${e.kind}`}><span className="t">{clock(e.ts)}</span><span className="i">{ICON[e.kind] ?? "·"}</span>
+        <span>{e.text}{tech && e.detail && Object.keys(e.detail).length > 0 && <span className="muted small"> {JSON.stringify(e.detail)}</span>}</span></li>))}
     </ul>
   </div>);
 }
@@ -30,11 +87,12 @@ function Questions({ s }: { s: any }) {
     <p className="muted">How often the AI assistants <b>mention your business</b> when asked each question.</p>
     {s.questions.map((q: any) => (<div key={q.id} style={{ padding: ".9rem 0", borderTop: "1px solid var(--line)" }}>
       <b>“{q.text}”</b>
-      <div style={{ margin: ".5rem 0" }}><Compare label={q.text} before={q.before.mentioned} after={s.after ? q.after.mentioned : undefined} /></div>
+      <div style={{ margin: ".5rem 0" }}><Compare label={q.text} before={q.before.mentioned} after={s.after && q.retested ? q.after.mentioned : undefined} />
+        {s.after && !q.retested && <p className="muted small" style={{ margin: ".35rem 0 0" }}>These changes aren't meant to help this question, so it wasn't asked again.</p>}</div>
       <details><summary>See what the AI said</summary>
         <div className="grid2" style={{ marginTop: ".75rem" }}>
           <div><p className="small muted">Today</p><div className="quote">{q.before_answer || "No answer."}</div></div>
-          {s.after && <div><p className="small" style={{ color: "var(--primary)" }}>With the changes</p><div className="quote">{q.after_answer || "No answer."}</div></div>}
+          {s.after && q.retested && <div><p className="small" style={{ color: "var(--primary)" }}>With the changes</p><div className="quote">{q.after_answer || "No answer."}</div></div>}
         </div></details>
     </div>))}
   </div>);
@@ -73,6 +131,33 @@ function Deliver({ s, runId, reload }: { s: any; runId: number; reload: () => vo
   </div>);
 }
 
+function Findability({ s }: { s: any }) {
+  const items: any[] = s.findability ?? [];
+  const sum = s.findability_summary;
+  if (!items.length) return null;
+  return (<div className="card">
+    <h2>Can AI assistants find your website today?</h2>
+    {sum && <p className="muted">Real web search shows your site for <b>{sum.questions_found} of {sum.questions_checked}</b> of your customers' questions
+      {sum.brand_found ? ", and it finds you when someone searches your business name." : ", and it doesn't find you when someone searches your business name."}</p>}
+    {items.map(i => (<div key={i.id} className="row between" style={{ padding: ".55rem 0", borderTop: "1px solid var(--line)", alignItems: "flex-start" }}>
+      <span style={{ flex: 1, minWidth: 220 }}>{i.id === "brand" ? <>Your business name: <b>“{i.query}”</b></> : <>“{i.query}”</>}
+        {i.status === "not_found" && i.top_domains?.length > 0 && <span className="muted small"><br />Search shows instead: {i.top_domains.join(", ")}</span>}</span>
+      <span className={`pill ${i.status === "found" ? "good" : i.status === "unknown" ? "" : "warn"}`}>{i.status === "found" ? `Found · result #${i.rank}` : i.status === "unknown" ? "Couldn't check" : "Not in the top 10"}</span></div>))}
+    <p className="muted small" style={{ marginTop: ".9rem", marginBottom: 0 }}>Changing a page helps assistants <b>use</b> it once they see it, and that is what the practice test below measures.
+      Being seen in the first place depends on how specific your pages are and how well known your site is, so one page can only do so much. That's what the bigger steps are for.</p>
+  </div>);
+}
+
+function BiggerSteps({ items }: { items: any[] }) {
+  if (!items?.length) return null;
+  return (<div className="card">
+    <h2>Bigger steps that will help most</h2>
+    <p className="muted">Editing pages can't do these, but they're the moves most likely to get your business found.</p>
+    {items.map((r, i) => (<div key={i} style={{ padding: ".8rem 0", borderTop: "1px solid var(--line)" }}>
+      <b>{r.title}</b><p style={{ margin: ".25rem 0" }}>{r.action}</p><p className="muted small" style={{ margin: 0 }}>{r.why}</p></div>))}
+  </div>);
+}
+
 export function RunView({ runId }: { runId: number }) {
   const [s, setS] = useState<any>(null);
   const [props, setProps] = useState<any[]>([]);
@@ -98,10 +183,13 @@ export function RunView({ runId }: { runId: number }) {
     await load();
   });
 
+  if (s.status === "cancelled") return (<div className="card"><h2>This round was stopped</h2>
+    <p className="muted">Nothing was changed on your website. Go to Home and choose “Find improvements” to start a new round whenever you like.</p></div>);
+
   if (s.status === "failed") return (<div className="card"><Banner kind="bad"><b>Something went wrong.</b><br />{s.error}</Banner>
     <Button busy={busy} onClick={() => run(async () => { await api(`/runs/${runId}/advance`, "POST"); await load(); })}>Try again</Button></div>);
 
-  if (["created", "kb", "prompts", "baseline", "optimize", "candidate", "evaluate"].includes(s.stage) && s.stage !== "done") return <Progress stage={s.stage} />;
+  if (["created", "kb", "prompts", "baseline", "optimize", "candidate", "evaluate"].includes(s.stage) && s.stage !== "done") return <Progress runId={runId} stage={s.stage} onChange={load} />;
 
   return (<div>
     {s.stage === "done" && s.recommendation === "no_changes" && <div className="card hero"><h2>No safe improvements this time</h2>
@@ -112,12 +200,19 @@ export function RunView({ runId }: { runId: number }) {
       <p className="muted small" style={{ margin: 0 }}>PRACTICE TEST RESULT</p>
       <h2>{candidates.length ? `We found ${candidates.length} improvement${candidates.length > 1 ? "s" : ""}` : "Results of the practice test"}</h2>
       <div className="row" style={{ gap: "1.5rem", margin: "1rem 0" }}>
-        <div><div className="big-num" style={{ color: "var(--muted)" }}>{pct(s.before.mentioned)}</div><span className="muted small">of AI answers mention you today</span></div>
+        <div><div className="big-num" style={{ color: "var(--muted)" }}>{pct(s.before.mentioned)}</div><span className="muted small">of answers mention you today,<br />when your page is in the results</span></div>
         <span className="arrow">→</span>
         <div><div className="big-num" style={{ color: "var(--primary)" }}>{pct(s.after.mentioned)}</div><span className="small">with these changes</span></div>
       </div>
-      <p className="muted small" style={{ margin: 0 }}>This is a practice run, asking assistants the same questions with and without the changes. The real result depends on when AI assistants next look at your site, so we'll check again after you publish.</p>
+      <div className="row small" style={{ gap: "1.5rem" }}>
+        <span>Link to you: <b>{pct(s.before.cited)}</b> → <b>{pct(s.after.cited)}</b></span>
+        {s.before.used !== undefined && <span>Use your page's content: <b>{pct(s.before.used)}</b> → <b>{pct(s.after.used)}</b></span>}
+      </div>
+      <p className="muted small" style={{ margin: ".75rem 0 0" }}>In this practice test, your page was placed among the search results in both rounds, so the difference shows how much better your page works, not luck in ranking. The real result also depends on when AI assistants next look at your site, so we'll check again after you publish.</p>
     </div>)}
+
+    <Findability s={s} />
+    <BiggerSteps items={s.recommendations} />
 
     {s.stage === "awaiting_approval" && candidates.length > 0 && (<div className="card">
       <h2>Choose what goes ahead</h2>

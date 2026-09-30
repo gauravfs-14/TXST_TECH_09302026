@@ -51,7 +51,12 @@ class DuckDuckGoSearch:
     def search(self, query: str, max_results: int = 5) -> list[SearchHit]:
         from ddgs import DDGS
 
-        res = DDGS().text(query, max_results=max_results) or []
+        try:
+            res = DDGS(timeout=15).text(query, max_results=max_results) or []
+        except Exception as e:
+            if "no results" in str(e).lower():
+                return []  # an empty result set, not a failure
+            raise
         return [SearchHit(r.get("href") or r.get("url", ""), r.get("title", ""), r.get("body", "")) for r in res if r.get("href") or r.get("url")]
 
     def fetch(self, url: str) -> tuple[str, str]:

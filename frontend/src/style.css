@@ -94,3 +94,13 @@ table { width: 100%; border-collapse: collapse } td, th { text-align: left; padd
 }
 
 .actions { position: sticky; bottom: 0; padding: 1.25rem 0 1rem; margin-top: 1rem; background: linear-gradient(to bottom, transparent, var(--bg) 35%) }
+
+/* live progress */
+.pulse { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--primary); margin-right: .45rem; animation: pulse 1.6s ease-in-out infinite }
+.pulse.slow { background: var(--clay) }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 45%, transparent) } 50% { box-shadow: 0 0 0 6px transparent } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none } }
+.feed { list-style: none; margin: .5rem 0 0; padding: .5rem .75rem; max-height: 340px; overflow: auto; background: var(--sunk); border: 1px solid var(--line); border-radius: 12px; font-size: .9rem }
+.feed li { display: flex; gap: .6rem; padding: .3rem 0; border-bottom: 1px dashed var(--line) } .feed li:last-child { border-bottom: 0 }
+.feed .t { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; font-size: .8rem; padding-top: .1rem } .feed .i { flex: none; width: 1.1rem; text-align: center; color: var(--muted) }
+.feed .k-ask .i, .feed .k-done .i { color: var(--primary) } .feed .k-step { font-weight: 600 } .feed .k-wait { color: var(--clay) } .feed .k-warn { color: var(--brick) } .feed .k-tool { color: var(--muted) }

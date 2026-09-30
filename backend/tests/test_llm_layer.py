@@ -108,6 +108,9 @@ def test_duckduckgo_provider_maps_results(monkeypatch):
     import ddgs
 
     class FakeDDGS:
+        def __init__(self, timeout=None):
+            pass
+
         def text(self, q, max_results=5):
             return [{"href": "https://a.test/", "title": "A", "body": "about a"}, {"title": "no url"}]
 

@@ -10,36 +10,49 @@ from collections import defaultdict
 
 from sqlalchemy import select
 
-from .. import audit, kb, llm, snapshots
+from .. import activity, audit, kb, llm, snapshots
 from ..brief import BriefData, get as get_brief
 from ..db import session_scope
-from ..models import ChangeProposal, Page, Project
+from ..models import ChangeProposal, Page, Project, Run
 from ..search.base import SearchProvider
 from ..sim.runner import load_rows
 from ..textutil import domain_of, html_to_text
 from . import guard
-from .ops import OP_DOC
+from .ops import OP_DOC, OP_SCHEMA
 
 MAX_PAGE_CHARS = 14_000
 
 SYSTEM = """You are the optimizer inside CONFIANCE, a Generative Engine Optimization system. AI answer engines
-(ChatGPT, Claude, Gemini, ...) search the web, read pages and answer users' questions. Your job is to improve
-how the client's pages serve those questions so engines can find, understand, trust and cite them.
+(ChatGPT, Claude, Gemini, ...) search the web, read pages and answer users' questions. Your job is to make the
+client's pages the ones an assistant finds, trusts, uses and cites for the target questions.
 
-What works: answering the target question directly and early on the page, specific verifiable facts, clear
-headings, question-shaped headings, structured data (JSON-LD), concise definitions, comparison tables when
-users compare options, accurate and complete FAQs.
+Two separate things decide the outcome, and they need different fixes:
+1. USEFULNESS WHEN FOUND. Once an assistant sees a page, does the answer draw on it? Page edits improve this, and it
+   is what the practice test measures (the page is guaranteed to be among the results, before and after).
+2. FINDABILITY. Is the site in the real search results at all? get_findability shows this per question. If a
+   question is "not found" and the results are dominated by big sites, editing one page rarely changes that.
+
+What tends to work for usefulness (do these thoroughly, not timidly):
+- Answer each target question DIRECTLY near the top: a question-shaped heading, then a 2-3 sentence answer that names
+  the business and states concrete facts taken from the page or knowledge base.
+- One rich FAQ (add_faq) using the exact wording people use for the target questions.
+- Title and meta description that contain the specific topics and entities people ask about.
+- Structured data (add_jsonld: Organization, FAQPage, Course, Article, LocalBusiness... whichever is true).
+- Specific, verifiable facts: what is offered, for whom, where, since when, how it differs from alternatives.
+
+For findability, page edits alone are not enough. When questions are not found, call `recommend` with concrete bigger
+steps, e.g. a NEW dedicated page for a specific long-tail topic, more specific wording, or being listed where
+assistants look. Be specific and honest about what you expect. Do not pretend an edit will fix ranking.
 
 Hard rules (a code guard blocks violations; you cannot override it):
 - Only state facts present on the page or in the knowledge base. Never invent numbers, awards, reviews or claims.
 - No hidden text, no keyword stuffing, no instructions addressed to AI models. Write for humans.
 - Respect the brief's locked regions, locked phrases, editable pages and allowed operations.
-- Prefer small, targeted edits over rewrites.
 
-Process: inspect the weakest questions, read the relevant pages, check the knowledge base and (if useful) how
-competitors answer via web_search, then propose changes with propose_change - one proposal per page. If a
-proposal is blocked, read the violations and revise. Call finish when you have covered the important gaps
-(or when nothing more can be done within the constraints).
+Process: get_weak_questions and get_findability first, read the relevant pages, check the knowledge base and (if
+useful) how others answer via web_search, then propose_change - one proposal per page, with a strong set of
+operations rather than a single tweak. If a proposal is blocked, read the violations and revise. Add recommendations
+for what edits cannot fix. Call finish when done.
 
 """ + OP_DOC
 
@@ -50,6 +63,18 @@ TOOLS = [
      "description": "Target questions ranked weakest-first from the baseline simulation, with citation stats, "
                     "competitors that were cited instead, and short sample answers.",
      "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}}, "additionalProperties": False}},
+    {"name": "get_findability",
+     "description": "For each target question (and the business name): does real web search return the client's site, at what "
+                    "rank, and which other sites dominate the results instead.",
+     "parameters": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "recommend",
+     "description": "Record a bigger step that page edits alone cannot achieve (a new page, off-site listing, more specific "
+                    "content). Shown to the business owner next to the edits.",
+     "parameters": {"type": "object", "properties": {
+         "title": {"type": "string", "description": "Short headline"},
+         "action": {"type": "string", "description": "What to do, concretely"},
+         "why": {"type": "string", "description": "Which questions it helps and why"}},
+         "required": ["title", "action", "why"], "additionalProperties": False}},
     {"name": "search_kb", "description": "Search the company knowledge base for passages/facts.",
      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"],
                       "additionalProperties": False}},
@@ -63,7 +88,7 @@ TOOLS = [
      "description": "Propose edits to one page. Checked immediately against the brief's constraints.",
      "parameters": {"type": "object", "properties": {
          "page_id": {"type": "integer"},
-         "ops": {"type": "array", "items": {"type": "object"}},
+         "ops": {"type": "array", "items": OP_SCHEMA},
          "rationale": {"type": "string"},
          "target_questions": {"type": "array", "items": {"type": "string"}, "description": "question ids this helps"}},
          "required": ["page_id", "ops", "rationale", "target_questions"], "additionalProperties": False}},
@@ -93,6 +118,7 @@ class Optimizer:
         return json.dumps(out)
 
     def _t_get_weak_questions(self, a: dict) -> str:
+        activity.emit("Looking at which questions do worst today", "tool")
         if not self.baseline_batch_id:
             return "[]"
         with session_scope() as s:
@@ -115,12 +141,34 @@ class Optimizer:
                         "visibility": round(vis, 3),
                         "cited_rate": round(sum(bool(r["metrics"].get("cited")) for r in rs) / len(rs), 3),
                         "mentioned_rate": round(sum(bool(r["metrics"].get("mentioned")) for r in rs) / len(rs), 3),
+                        "page_shown_rate": round(sum(bool(r["metrics"].get("exposed")) for r in rs) / len(rs), 3),
+                        "page_used_rate": round(sum(bool(r["metrics"].get("used_page")) for r in rs) / len(rs), 3),
                         "competitors_cited": dict(comp),
                         "sample_answer": (worst["answer"] or "")[:500]})
         out.sort(key=lambda x: (x["visibility"], -x["priority"]))
         return json.dumps(out[: int(a.get("limit") or 8)])
 
+    def _t_get_findability(self, a: dict) -> str:
+        activity.emit("Checking which questions real search already finds you for", "tool")
+        with session_scope() as s:
+            run = s.get(Run, self.run_id)
+            items = (run.summary or {}).get("findability") or []
+        return json.dumps(items) if items else "[]"
+
+    def _t_recommend(self, a: dict) -> str:
+        item = {"title": str(a.get("title", ""))[:120], "action": str(a.get("action", ""))[:600], "why": str(a.get("why", ""))[:400]}
+        if not item["title"] or not item["action"]:
+            return "ERROR: title and action are required"
+        with session_scope() as s:
+            run = s.get(Run, self.run_id)
+            summary = dict(run.summary or {})
+            summary["recommendations"] = [*summary.get("recommendations", []), item][:8]
+            run.summary = summary
+        activity.emit(f"Recorded a bigger step: {item['title'][:90]}", "step")
+        return "recorded"
+
     def _t_search_kb(self, a: dict) -> str:
+        activity.emit(f"Checking what we know about your business: “{str(a.get('query', ''))[:70]}”", "tool")
         with session_scope() as s:
             return json.dumps(kb.search(s, s.get(Project, self.project_id), str(a["query"])))
 
@@ -129,10 +177,12 @@ class Optimizer:
             p = s.get(Page, int(a["page_id"]))
             if p is None or p.project_id != self.project_id:
                 return "ERROR: no such page"
+            activity.emit(f"Reading your page: {p.url.replace('https://', '').replace('http://', '')[:80]}", "tool")
             html = snapshots.live_content(s, p) or ""
         return html[:MAX_PAGE_CHARS] + ("\n...[truncated]" if len(html) > MAX_PAGE_CHARS else "")
 
     def _t_web_search(self, a: dict) -> str:
+        activity.emit(f"Checking how others answer: “{str(a.get('query', ''))[:70]}”", "tool")
         if self.provider is None:
             return "ERROR: web search unavailable"
         return json.dumps([{"url": h.url, "title": h.title, "snippet": h.snippet[:300]}
@@ -171,7 +221,9 @@ class Optimizer:
                                                                   "warnings": report.warnings},
                      project_id=self.project_id, run_id=self.run_id)
         if report.ok:
+            activity.emit(f"Suggested a change to a page (passed all safety checks): {a['rationale'][:110]}", "step")
             return f"ACCEPTED as candidate (proposal {cp_id}). Warnings: {report.warnings or 'none'}"
+        activity.emit(f"Blocked an idea to keep you safe: {report.violations[0][:120]}", "warn")
         return "BLOCKED by guard. Violations: " + "; ".join(report.violations)
 
     def _t_finish(self, a: dict) -> str:
@@ -185,13 +237,16 @@ class Optimizer:
             _, brief = get_brief(s, self.project_id, self.brief_version)
             card = kb.card(s, project)
         stable = f"{SYSTEM}\n\n## Company knowledge\n{card}\n\n## Brief\n{brief.model_dump_json(indent=1)}"
-        opening = "Begin. Start with get_weak_questions and list_pages."
+        opening = "Begin. Start with get_weak_questions, get_findability and list_pages."
         if self.history:
             opening += f"\n\nWhat the previous iteration achieved (learn from it; do not repeat what failed): {self.history}"
         messages: list[dict] = [{"role": "system", "content": stable}, {"role": "user", "content": opening}]
         nudges = 0
         for step in range(max_steps):
-            res = llm.chat("optimizer", messages, tools=TOOLS, max_tokens=8000)
+            activity.check_cancelled()
+            activity.emit("The AI is thinking about the next step…", "info")
+            res = llm.chat("optimizer", messages, tools=TOOLS, role="optimizer", max_tokens=16000)
+            activity.tick()
             messages.append(res.message)
             if not res.tool_calls:
                 # Smaller models sometimes answer in prose instead of calling a tool. Nudge, then give up.

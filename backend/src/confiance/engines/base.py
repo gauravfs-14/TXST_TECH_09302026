@@ -19,10 +19,11 @@ from dataclasses import dataclass, field
 from ..search.sandbox import ToolSession
 
 CONTROLLED_SYSTEM = (
-    "You are a helpful AI assistant answering a user's question. Use the web_search tool to find "
-    "current, specific information, and fetch_page to read promising results. Give a direct, useful "
-    "answer. When you rely on a source, cite it inline with its URL. End with a 'Sources:' list of the "
-    "URLs you used."
+    "You are an AI assistant with web search, answering a user's question. ALWAYS call web_search first, "
+    "even if you think you know the answer, and base your answer on what the results say. Use fetch_page to "
+    "read the most relevant results before you answer. Recommend specific sites, products or businesses "
+    "when the question calls for it. When you rely on a source, cite it inline with its URL, and end with "
+    "a 'Sources:' list of the URLs you used."
 )
 
 _URL = re.compile(r"https?://[^\s)\]>\"'<,]+")
@@ -42,6 +43,7 @@ class EngineAnswer:
     queries: list[str] = field(default_factory=list)
     model_id: str = ""
     injected: bool = False
+    exposed: bool = False  # a client page was in front of the assistant
     steps: int = 0
     error: str | None = None
     latency_ms: int = 0
@@ -85,14 +87,14 @@ class Engine(ABC):
             if mode == "controlled":
                 assert tools is not None
                 ans = self.controlled(convo, tools)
-                ans.queries, ans.injected = list(tools.queries), tools.injected
+                ans.queries, ans.injected, ans.exposed = list(tools.queries), tools.injected, tools.exposed
                 ans.retrieved_urls = list(dict.fromkeys(tools.retrieved))
             else:
                 ans = self.native(convo)
         except Exception as e:  # recorded, never crashes a batch
             ans = EngineAnswer(error=f"{type(e).__name__}: {e}", model_id=self.model)
             if tools is not None:
-                ans.queries, ans.injected = list(tools.queries), tools.injected
+                ans.queries, ans.injected, ans.exposed = list(tools.queries), tools.injected, tools.exposed
         ans.latency_ms = int((time.monotonic() - t0) * 1000)
         if not ans.citations and ans.text:
             ans.citations = urls_in(ans.text)
@@ -129,7 +131,7 @@ def available_engines() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def build_engine(name: str, model: str | None = None) -> Engine:
+def build_engine(name: str, model: str | None = None, max_steps: int | None = None) -> Engine:
     from ..config import get_settings
 
     s = get_settings()
@@ -137,5 +139,5 @@ def build_engine(name: str, model: str | None = None) -> Engine:
         raise ValueError(f"unknown engine {name!r}; registered: {available_engines()}")
     if name == "offline" and not s.allow_offline:
         raise RuntimeError("offline engine requires CONFIANCE_ALLOW_OFFLINE=true")
-    default = s.llm_model if name == "openai" else s.engine_models.get(name, "")
-    return _REGISTRY[name](model or default, s.max_engine_steps)
+    default = (s.llm_worker_model or s.llm_model) if name == "openai" else s.engine_models.get(name, "")
+    return _REGISTRY[name](model or default, max_steps or s.max_engine_steps)

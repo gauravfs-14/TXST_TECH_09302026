@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { assistant, friendlyDrift } from "../copy";
-import { Banner, Button, Field, useAction } from "../ui";
+import { Banner, Button, Field, ListInput, useAction } from "../ui";
+import { pageName } from "../copy";
 import { Accounts } from "./Accounts";
 import { DeliveryChoice } from "./Setup";
 
@@ -36,6 +37,37 @@ function Spending({ projectId }: { projectId: number }) {
     {u && <p className="muted small" style={{ marginTop: ".5rem" }}>{(u.rows.reduce((a: number, r: any) => a + r.input_tokens + r.output_tokens, 0)).toLocaleString()} units of AI work so far{u.total_usd === 0 ? ". Models running on your own computer are free." : "."}</p>}</div>);
 }
 
+function Questions({ project }: { project: any }) {
+  const [b, setB] = useState<any>(null);
+  const [pages, setPages] = useState<string[]>([]);
+  const [saved, setSaved] = useState(false);
+  const { busy, error, run } = useAction();
+  useEffect(() => {
+    api(`/projects/${project.id}/simple-brief`).then(setB);
+    api(`/projects/${project.id}/prepare`).then(r => setPages(r.pages ?? []));
+  }, [project.id]);
+  if (!b) return <div className="card"><h2>Your questions and rules</h2><p className="muted">Loading…</p></div>;
+  const set = (k: string, v: any) => { setB({ ...b, [k]: v }); setSaved(false); };
+  return (<div className="card"><h2>Your questions and rules</h2>
+    <p className="muted">Change these any time. Your next round uses what's saved here.</p>
+    <Field label="Questions your customers ask" hint="Put the most important first. Quick rounds use the first 4, Standard the first 6. Fewer questions means fewer AI requests.">
+      <ListInput values={b.questions} onChange={v => set("questions", v)} placeholder="A question" addLabel="Add a question" /></Field>
+    <Field label="Competitors' websites (optional)"><ListInput values={b.competitors} onChange={v => set("competitors", v)} placeholder="www.competitor.com" addLabel="Add a competitor" /></Field>
+    <Field label="Sentences we must never change" hint="Copy them exactly as they appear on your website.">
+      <ListInput values={b.never_change} onChange={v => set("never_change", v)} placeholder="A sentence to keep as it is" addLabel="Add a sentence" /></Field>
+    <Field label="Things we must never claim"><ListInput values={b.never_say} onChange={v => set("never_say", v)} placeholder="A claim we should never make" addLabel="Add a claim" /></Field>
+    {pages.length > 0 && <Field label="Pages we may improve">
+      {pages.map(pg => (<label className="check" key={pg}><input type="checkbox" checked={b.editable_pages.includes(pg)}
+        onChange={e => set("editable_pages", e.target.checked ? [...b.editable_pages, pg] : b.editable_pages.filter((x: string) => x !== pg))} />
+        <span><b>{pageName(pg)}</b> <span className="muted small">{pg.replace(/^https?:\/\//, "")}</span></span></label>))}</Field>}
+    {error && <Banner kind="bad">{error}</Banner>}
+    <div className="row"><Button busy={busy} onClick={() => run(async () => {
+      await api(`/projects/${project.id}/simple-brief`, "PUT", { ...b, editable_pages: b.editable_pages.length === pages.length ? [] : b.editable_pages });
+      setSaved(true);
+    })}>Save changes</Button>{saved && <span className="small">✓ Saved. Your next round will use this.</span>}</div>
+  </div>);
+}
+
 export function Settings({ project, onChanged }: { project: any; onChanged: () => void }) {
   const [name, setName] = useState(project.name);
   const { busy, error, run } = useAction();
@@ -48,6 +80,7 @@ export function Settings({ project, onChanged }: { project: any; onChanged: () =
       {error && <Banner kind="bad">{error}</Banner>}
       <div className="row"><Button busy={busy} onClick={() => run(async () => { await api(`/projects/${project.id}`, "PATCH", { business_name: name }); setSaved(true); onChanged(); })}>Save</Button>{saved && <span className="small">✓ Saved</span>}</div>
     </div>
+    <Questions project={project} />
     <div className="card"><h2>How you receive improvements</h2><DeliveryChoice /></div>
     <Health />
     <Spending projectId={project.id} />
