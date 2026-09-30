@@ -17,6 +17,9 @@ onboard (brief: goals + constraints) -> knowledge base -> personas -> baseline s
 ./start.sh        # installs what it needs, starts everything, opens http://localhost:5173
 ```
 
+The frontend serves the marketing site at `/`, `/product` and `/pricing` (code in `frontend/src/landing/`),
+and the web app at `/dashboard`. The site's "Open dashboard" buttons go there.
+
 The web app walks a non-technical person through everything: connect an AI model, enter a business name and
 website address, confirm suggested customer questions, say what must never change, then press **Find
 improvements**. There is no JSON, code or configuration to touch. Settings entered in the app are stored in
