@@ -9,7 +9,7 @@
 Confiance uses **digital twins** and **agentic AI** to find out how AI assistants talk about your brand and
 products, test improvements safely before anything goes live, and keep proving (or disproving) that they worked.
 
-[Quick start](#-quick-start) · [How it works](#-how-it-works) · [Architecture](#-architecture) · [Features](#-features) · [Screenshots](#-product-tour) · [Configuration](#-configuration) · [Status](#-project-status-mvp)
+[Quick start](#-quick-start) · [How it works](#-how-it-works) · [Architecture](#-architecture) · [Tech stack](#-tech-stack) · [Features](#-features) · [Screenshots](#-product-tour) · [Configuration](#-configuration) · [Status](#-project-status-mvp)
 
 <img src="assets/screenshots/01-landing-home.jpg" alt="Confiance home page" width="860" />
 
@@ -25,12 +25,13 @@ products, test improvements safely before anything goes live, and keep proving (
 4. [Features](#-features)
 5. [Product tour](#-product-tour)
 6. [Architecture](#-architecture)
-7. [Security and safety model](#-security-and-safety-model)
-8. [Running and operating it](#-running-and-operating-it)
-9. [Configuration](#-configuration)
-10. [Repository layout](#-repository-layout)
-11. [Development](#-development)
-12. [Project status (MVP)](#-project-status-mvp)
+7. [Tech stack](#-tech-stack)
+8. [Security and safety model](#-security-and-safety-model)
+9. [Running and operating it](#-running-and-operating-it)
+10. [Configuration](#-configuration)
+11. [Repository layout](#-repository-layout)
+12. [Development](#-development)
+13. [Project status (MVP)](#-project-status-mvp)
 
 ---
 
@@ -313,18 +314,6 @@ Human gates sit at **approval** and **confirm-live**. A crash or restart resumes
 repeating finished, paid stages. Deploys are snapshotted first and refused if the live page changed since the proposal;
 rollback re-deploys the previous content as a new version.
 
-### Technology
-
-| Layer | Stack |
-|---|---|
-| Web app | React 19, TypeScript, Vite 7, Tailwind CSS 4, Radix UI / shadcn components, Motion |
-| API | Python 3.13, FastAPI, Pydantic, Uvicorn |
-| Persistence | SQLAlchemy 2 on SQLite (Postgres-ready), content-addressed blob store |
-| AI | OpenAI-compatible SDK (works with hosted and local models), optional Claude / Gemini adapters |
-| Search | DuckDuckGo (no key), Tavily, Brave, SearXNG |
-| Jobs | APScheduler (drift checks, post-deploy wake-ups) |
-| Packaging | Multi-stage Docker image, `docker compose`, `run.sh` |
-
 ### Token-cost controls
 - One-time KB build, skipped when page content hash is unchanged; agents get a compact card, not the site.
 - The card, brief and tool list form a prompt-cache prefix for optimizer, persona and judge calls.
@@ -332,6 +321,34 @@ rollback re-deploys the previous content as a new version.
 - Stages persist output, so a resumed run never repeats finished stages.
 - Every call lands in a usage ledger (per component, run and model), shown in the app's spend view.
 - Pacing adapts to rate limits and falls back to the fast model when a daily quota is exhausted.
+
+---
+
+## 🧰 Tech stack
+
+<p>
+<img alt="Python" src="https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white" />
+<img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white" />
+<img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
+<img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" />
+<img alt="Vite" src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" />
+<img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white" />
+<img alt="SQLite" src="https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white" />
+<img alt="Docker" src="https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white" />
+</p>
+
+| Layer | Technology |
+|---|---|
+| **Web app** | React 19, TypeScript 5, Vite 7, Tailwind CSS 4, Radix UI / shadcn components, React Router 7, Motion, Sonner |
+| **API** | Python 3.13, FastAPI, Pydantic (+ pydantic-settings), Uvicorn |
+| **Persistence** | SQLAlchemy 2 on SQLite (Postgres-ready), content-addressed blob store for page snapshots |
+| **AI models** | OpenAI-compatible SDK: OpenAI, Google Gemini, Ollama, OpenRouter, Groq, LM Studio, vLLM. Optional Anthropic and Google GenAI adapters |
+| **Search** | DuckDuckGo (`ddgs`, no key), Tavily, Brave, SearXNG |
+| **Crawling and analysis** | httpx, BeautifulSoup, JSON Schema validation, BM25 retrieval, Lighthouse |
+| **Statistics** | Wilson intervals, bootstrap confidence intervals, paired comparisons |
+| **Jobs** | APScheduler (drift checks, post-deploy wake-ups) |
+| **Tooling** | uv (Python), npm, pytest (154 tests) |
+| **Packaging** | Multi-stage Docker image, Docker Compose, `run.sh` |
 
 ---
 
