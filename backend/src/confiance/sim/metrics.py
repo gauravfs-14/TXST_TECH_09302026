@@ -32,7 +32,7 @@ class Target:
 
 
 def score(ans: EngineAnswer, t: Target, *, kb_card: str = "", prompt: str = "", judge: bool = False,
-          page_texts: list[str] | None = None) -> dict:
+          page_texts: list[str] | None = None, product: dict | None = None) -> dict:
     text = ans.text or ""
     prose = _URL.sub(" ", text)  # a cited URL is a citation, not a mention in the prose
     m = t.alias_re().search(prose)
@@ -53,6 +53,8 @@ def score(ans: EngineAnswer, t: Target, *, kb_card: str = "", prompt: str = "", 
         "n_citations": len(cites),
         "answer_chars": len(text),
         "searched": bool(ans.queries),
+        "fetched": bool(getattr(ans, "fetched", False)),
+        "truncated": bool(getattr(ans, "truncated", False)),
         "exposed": bool(getattr(ans, "exposed", False)) or retrieved,
     }
     if page_texts is not None:
@@ -64,6 +66,10 @@ def score(ans: EngineAnswer, t: Target, *, kb_card: str = "", prompt: str = "", 
         overlap = hit / max(len(a), 1)
         metrics["page_overlap"] = round(overlap, 4)
         metrics["used_page"] = bool(metrics["exposed"]) and hit >= 3 and overlap >= 0.03
+    if product is not None:
+        from . import products as prodmod
+
+        metrics.update(prodmod.metrics(prose, cites, product))
     if judge and metrics["answered"]:
         try:
             j = llm.json_call(
@@ -79,16 +85,21 @@ def score(ans: EngineAnswer, t: Target, *, kb_card: str = "", prompt: str = "", 
 
 
 def visibility_score(m: dict) -> float:
-    """Single 0-1 number per answer, used for paired comparisons. Being cited or recommended counts most;
-    when page usage was measured, drawing on the page's content counts too."""
+    """Single 0-1 number per answer, used for paired comparisons.
+
+    Brand questions: mention, link, page use, exposure, recommendation. Product questions: is the product named,
+    is the site or product page linked, is the product near the top of the assistant's list."""
     if not m.get("answered"):
         return 0.0
-    rec = m["recommended"] if m.get("recommended") is not None else bool(m["mentioned"] and m["cited"])
+    used = min(1.0, m.get("page_overlap", 0.0) / 0.10) if "page_overlap" in m else float(m.get("used_page", False))
+    if "product_mentioned" in m:
+        top3 = m.get("product_rank") is not None and m["product_rank"] <= 3
+        return min(1.0, 0.20 * m["product_mentioned"] + 0.20 * m.get("cited", False) + 0.10 * m.get("product_cited", False)
+                   + 0.20 * used + 0.10 * bool(m.get("exposed")) + 0.20 * top3)
+    mentioned, cited = m.get("mentioned", False), m.get("cited", False)
+    rec = m["recommended"] if m.get("recommended") is not None else bool(mentioned and cited)
     if "used_page" in m:
         # Graded, not yes/no: 10% of the answer's phrases coming from the page counts as fully using it. Mentions and
         # links saturate as soon as the page is in front of the assistant, so this is where gains show up first.
-        used = min(1.0, m.get("page_overlap", 0.0) / 0.10) if "page_overlap" in m else float(m["used_page"])
-        v = 0.20 * m["mentioned"] + 0.25 * m["cited"] + 0.20 * used + 0.10 * bool(m.get("exposed")) + 0.25 * rec
-    else:  # results stored before page usage was measured
-        v = 0.25 * m["mentioned"] + 0.40 * m["cited"] + 0.10 * m["retrieved"] + 0.25 * rec
-    return min(v, 1.0)
+        return min(1.0, 0.20 * mentioned + 0.25 * cited + 0.20 * used + 0.10 * bool(m.get("exposed")) + 0.25 * rec)
+    return min(1.0, 0.25 * mentioned + 0.40 * cited + 0.10 * m.get("retrieved", False) + 0.25 * rec)  # results stored before page use was measured

@@ -21,7 +21,7 @@ class WordPressDeployer(Deployer):
                             auth=(self.config["user"], pw), timeout=30,
                             transport=self.config.get("_transport"))
 
-    def deploy(self, changes: list[Change], *, label: str, message: str) -> DeployResult:
+    def deploy(self, changes: list[Change], *, label: str, message: str, extras: dict[str, str] | None = None) -> DeployResult:
         publish = bool(self.config.get("publish", False))
         applied, errors = [], {}
         with self._client() as c:

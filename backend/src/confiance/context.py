@@ -9,6 +9,24 @@ _project: contextvars.ContextVar[int | None] = contextvars.ContextVar("project_i
 _run: contextvars.ContextVar[int | None] = contextvars.ContextVar("run_id", default=None)
 
 
+_task: contextvars.ContextVar[int | None] = contextvars.ContextVar("task_id", default=None)
+
+
+def current_task() -> int | None:
+    return _task.get()
+
+
+@contextmanager
+def task_scope(task_id: int) -> Iterator[None]:
+    """Attribute live-activity events to a one-off task (a scan, a question suggestion) that is not a round.
+    Kept apart from run ids so audit and cost records are never pointed at something that isn't a run."""
+    tok = _task.set(task_id)
+    try:
+        yield
+    finally:
+        _task.reset(tok)
+
+
 def current_ids() -> tuple[int | None, int | None]:
     return _project.get(), _run.get()
 

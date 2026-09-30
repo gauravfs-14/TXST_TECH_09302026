@@ -9,13 +9,15 @@ def test_percent_moves_through_stages_and_never_hits_100_early():
     rid = 901
     activity.reset(rid)
     seen = []
-    for stage, total in [("kb", 0), ("prompts", 2), ("baseline", 10), ("optimize", 0), ("candidate", 10), ("evaluate", 0)]:
+    for stage, total in [("requirements", 0), ("research", 4), ("baseline", 10), ("loop", 0), ("finalize", 0)]:
         activity.set_stage(rid, stage, total)
         with scope(None, rid):
+            if stage == "loop":
+                activity.set_loop(rid, 2, 3, "test")
             if total:
                 activity.tick(total // 2)
         seen.append(activity.snapshot(rid)["pct"])
-    assert seen == sorted(seen) and seen[0] == 0 and seen[-1] > 90 and seen[-1] < 100
+    assert seen == sorted(seen) and seen[0] == 0 and 70 < seen[-1] < 100
     activity.set_stage(rid, "awaiting_approval")
     assert activity.snapshot(rid)["pct"] == 100.0
 
@@ -27,7 +29,7 @@ def test_half_way_through_a_batch_is_half_of_that_stage():
     with scope(None, rid):
         activity.tick(5)
     s = activity.snapshot(rid)
-    assert (s["stage_done"], s["stage_total"]) == (5, 10) and round(s["pct"], 1) == round(5 + 5 + 35 * 0.5, 1)
+    assert (s["stage_done"], s["stage_total"]) == (5, 10) and round(s["pct"], 1) == round(6 + 12 + 22 * 0.5, 1)
 
 
 def test_events_are_incremental_and_bounded():
@@ -93,3 +95,17 @@ def test_a_run_interrupted_by_a_restart_can_be_resumed():
     st = orch.get_status(rid)
     assert st["status"] == "failed" and st["stage"] == "baseline" and "interrupted" in st["error"]
     orch._claim(rid)  # resuming is allowed again (it would be refused while 'running')
+
+
+def test_the_loop_stage_advances_loop_by_loop_and_reports_where_it_is():
+    rid = 905
+    activity.reset(rid)
+    activity.set_stage(rid, "loop")
+    activity.set_loop(rid, 1, 4, "draft")
+    a = activity.snapshot(rid)
+    activity.set_loop(rid, 3, 4, "test")
+    with scope(None, rid):
+        activity.set_total(10)
+        activity.tick(5)
+    b = activity.snapshot(rid)
+    assert a["loop"] == {"n": 1, "max": 4, "phase": "draft"} and b["loop"]["n"] == 3 and b["pct"] > a["pct"] + 15

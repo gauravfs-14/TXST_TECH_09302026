@@ -14,6 +14,7 @@ class Change:
     new_html: str
     proposal_id: int | None = None
     rationale: str = ""
+    is_new: bool = False  # a page that doesn't exist on the live site yet
 
 
 @dataclass
@@ -30,7 +31,9 @@ class Deployer(ABC):
         self.config = config
 
     @abstractmethod
-    def deploy(self, changes: list[Change], *, label: str, message: str) -> DeployResult: ...
+    def deploy(self, changes: list[Change], *, label: str, message: str, extras: dict[str, str] | None = None) -> DeployResult:
+        """extras: extra files to include in a package (relative path -> text), e.g. the report and site-files/llms.txt."""
+        ...
 
 
 _REGISTRY: dict[str, type[Deployer]] = {}

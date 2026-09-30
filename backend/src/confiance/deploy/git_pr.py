@@ -20,7 +20,7 @@ class GitPRDeployer(Deployer):
     Only pages with a `source_path` (a static HTML file in the repo) can be deployed this way;
     framework/CMS sites should use the CMS connector or the export deployer."""
 
-    def deploy(self, changes: list[Change], *, label: str, message: str) -> DeployResult:
+    def deploy(self, changes: list[Change], *, label: str, message: str, extras: dict[str, str] | None = None) -> DeployResult:
         repo = self.config["repo_path"]
         base = self.config.get("base_branch", "main")
         branch = f"confiance/{label}"

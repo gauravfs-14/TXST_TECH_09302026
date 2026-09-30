@@ -6,18 +6,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from .. import audit, brief as briefs, kb, snapshots, usage
+from .. import activity, audit, brief as briefs, kb, llm, snapshots, usage
 from ..config import get_settings
 from ..db import init_db, session_scope
 from ..deploy import service as deploy_service
 from ..drift import monitor
 from ..engines import available_engines
-from ..models import (Alert, AuditEvent, ChangeProposal, Deployment, DriftCheck, Page, PageVersion, Persona, Project,
+from ..models import (Alert, AuditEvent, ChangeProposal, Deployment, DriftCheck, Page, PageVersion, Persona, Product, Project,
                       Run, SimulationBatch)
 from ..pipeline import orchestrator
 from ..scheduler import build as build_scheduler
 from .. import secrets_store
 from .simple import router as simple_router
+from .v2 import router as v2_router
 
 
 @asynccontextmanager
@@ -36,6 +37,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CONFIANCE", version="0.1.0", lifespan=lifespan)
 app.include_router(simple_router)
+app.include_router(v2_router)
+@app.middleware("http")
+async def _task_header(request, call_next):
+    """A browser can tag a request with X-Task so we can show live activity for it while it runs."""
+    key = request.headers.get("x-task")
+    if not key or len(key) > 80:
+        return await call_next(request)
+    from ..context import task_scope
+    with task_scope(activity.begin_task(key)):
+        return await call_next(request)
+
+
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -202,25 +215,30 @@ def _advance_bg(run_id: int) -> None:
 
 
 class RunIn(BaseModel):
-    intensity: str = "quick"
+    intensity: str | None = None
+    overrides: dict | None = None
 
 
 @app.get("/api/projects/{pid}/plans")
-def run_plans(pid: int):
-    """The run sizes on offer, with an estimate of AI calls for this business's question list."""
+def run_plans(pid: int, loops: int = 3, track: str = "brand,products"):
+    """The round sizes on offer, with an estimate of AI requests for this business's questions, products and loop limit."""
     from ..pipeline import plans
+    tracks = {t for t in track.split(",") if t}
     with session_scope() as s:
         p = _404(s.get(Project, pid), "project")
-        n = len(briefs.get(s, pid)[1].target_questions) if p.current_brief_version else 0
-    return {"questions": n, "used_24h": __import__("confiance.llm", fromlist=["x"]).calls_today(),
-            "plans": [{"id": k, "label": v["label"], "blurb": v["blurb"],
-                       **plans.estimate_calls(n, k, get_settings().use_llm_judge)} for k, v in plans.PLANS.items()]}
+        brand = len(briefs.get(s, pid)[1].target_questions) if p.current_brief_version and "brand" in tracks else 0
+        prods = s.scalars(select(Product).where(Product.project_id == pid, Product.active)).all() if "products" in tracks else []
+        per_prod = sum(max(len(x.queries or []), 2) for x in prods)
+    return {"questions": brand, "products": len(prods), "used_24h": __import__("confiance.llm", fromlist=["x"]).calls_today(),
+            "plans": [{"id": k, "label": v["label"], "blurb": v["blurb"], "max_questions": v["max_questions"], "max_product_queries": v["max_product_queries"],
+                       **plans.estimate_calls(min(brand, v["max_questions"]) + min(per_prod, v["max_product_queries"]), k, get_settings().use_llm_judge, loops=max(1, min(loops, 10)))}
+                      for k, v in plans.PLANS.items()]}
 
 
 @app.post("/api/projects/{pid}/runs")
 def start_run(pid: int, bg: BackgroundTasks, body: RunIn | None = None):
     try:
-        rid = orchestrator.start_run(pid, (body.intensity if body else None))
+        rid = orchestrator.start_run(pid, (body.intensity if body else None), (body.overrides if body else None))
     except orchestrator.PipelineError as e:
         raise HTTPException(409, str(e))
     bg.add_task(_advance_bg, rid)
@@ -255,6 +273,12 @@ def get_run(rid: int):
     return orchestrator.get_status(rid)
 
 
+@app.get("/api/tasks/{key}/live")
+def task_live(key: str, after: int = 0):
+    """Live activity for a one-off task (scan, suggestions...). Same shape as a round's, without percent."""
+    return {"pace": llm.pace(), **activity.snapshot(activity.task_id(key[:80]), after)}
+
+
 @app.get("/api/runs/{rid}/live")
 def run_live(rid: int, after: int = 0):
     """Progress and a feed of what is happening now. Poll with ?after=<last_seq> to receive only new events."""
@@ -270,7 +294,7 @@ def run_proposals(rid: int):
         out = []
         for cp in s.scalars(select(ChangeProposal).where(ChangeProposal.run_id == rid).order_by(ChangeProposal.id)):
             page = s.get(Page, cp.page_id)
-            out.append({"id": cp.id, "page_id": cp.page_id, "url": page.url, "status": cp.status, "ops": cp.ops,
+            out.append({"id": cp.id, "page_id": cp.page_id, "url": page.url, "status": cp.status, "kind": cp.kind, "loop": cp.loop, "ops": cp.ops,
                         "rationale": cp.rationale, "target_questions": cp.target_questions,
                         "guard_report": cp.guard_report, "base_version_id": cp.base_version_id,
                         "candidate_version_id": cp.candidate_version_id})

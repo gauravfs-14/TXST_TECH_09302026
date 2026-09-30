@@ -91,7 +91,7 @@ def test_model_roles_and_defaults(monkeypatch):
 def test_thinking_is_never_turned_down_by_default(monkeypatch):
     captured = {}
     monkeypatch.setattr(llm, "_with_pacing", lambda f: f())
-    monkeypatch.setattr(llm, "_consume", lambda kw, *a: captured.update(kw) or NS())
+    monkeypatch.setattr(llm, "_consume", lambda kw, *a: captured.update(kw) or llm.LLMResult())
     monkeypatch.setenv("CONFIANCE_LLM_MODEL", "m")
     config.get_settings.cache_clear()
     llm.reset_pacing()

@@ -16,6 +16,25 @@ def _set_live(s, page: Page, version_id: int) -> None:
     page.live_version_id = version_id
 
 
+def _package_extras(run_id: int) -> dict[str, str]:
+    """The report and the plan's site files, bundled with the approved page changes."""
+    from .. import reports
+    from ..models import PlanAction
+
+    extras: dict[str, str] = {}
+    try:
+        rep = reports.build(run_id)
+        extras["report.html"], extras["report.md"] = reports.render_html(rep), reports.render_markdown(rep)
+    except Exception:
+        pass  # a report problem must never block deploying approved changes
+    with session_scope() as s:
+        for a in s.scalars(select(PlanAction).where(PlanAction.run_id == run_id)):
+            fn = (a.draft or {}).get("filename")
+            if fn and (a.draft or {}).get("content") and "/" not in fn and ".." not in fn and a.status != "dismissed":
+                extras[f"site-files/{fn}"] = a.draft["content"]
+    return extras
+
+
 def deploy_run(run_id: int, actor: str = "user") -> int:
     with session_scope() as s:
         run = s.get(Run, run_id)
@@ -31,7 +50,7 @@ def deploy_run(run_id: int, actor: str = "user") -> int:
                 raise DeployError(f"page {page.url} changed since the proposal was made; re-run the optimizer "
                                   f"(refusing to overwrite newer content)")
             changes.append(Change(page.id, page.url, page.source_path, snapshots.live_content(s, page) or "",
-                                  snapshots.version_content(s, cp.candidate_version_id), cp.id, cp.rationale))
+                                  snapshots.version_content(s, cp.candidate_version_id), cp.id, cp.rationale, is_new=bool(page.is_new)))
             versions[str(page.id)] = {"from": cp.base_version_id, "to": cp.candidate_version_id}
         cfg = project.deploy_config or {"type": "export"}
         message = f"CONFIANCE run {run_id}: GEO improvements for {project.name}\n\n" + "\n".join(
@@ -39,7 +58,7 @@ def deploy_run(run_id: int, actor: str = "user") -> int:
         project_id = project.id
     audit.record("deploy.started", actor, {"deployer": cfg.get("type"), "pages": len(changes)},
                  project_id=project_id, run_id=run_id)
-    result = build_deployer(cfg).deploy(changes, label=f"run-{run_id}", message=message)
+    result = build_deployer(cfg).deploy(changes, label=f"run-{run_id}", message=message, extras=_package_extras(run_id))
     with session_scope() as s:
         dep = Deployment(project_id=project_id, run_id=run_id, kind="deploy", deployer=cfg.get("type", "export"),
                          status=result.status, external_ref=result.external_ref, versions=versions,

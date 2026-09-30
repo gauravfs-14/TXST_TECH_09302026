@@ -44,6 +44,8 @@ def import_pages(s: Session, project: Project, pages: list[tuple[str, str]], *, 
             page = Page(project_id=project.id, url=url, source_path=(source_paths or {}).get(url))
             s.add(page)
             s.flush()
+        elif page.kind == "archived":
+            page.kind = "page"  # the site address came back
         cur = snapshots.live_content(s, page)
         if cur != html:
             v = snapshots.new_version(s, page, html, source, parent_id=page.live_version_id, note="imported")
@@ -71,7 +73,7 @@ def _vh(s: Session, p: Page) -> str:
 
 
 def build(s: Session, project: Project, *, force: bool = False) -> int:
-    pages = list(s.scalars(select(Page).where(Page.project_id == project.id)))
+    pages = list(s.scalars(select(Page).where(Page.project_id == project.id, Page.kind != "archived")))
     if not pages:
         raise ValueError("no pages to build a knowledge base from; crawl or import pages first")
     fingerprint = hashlib.sha256("".join(sorted(_vh(s, p) for p in pages if p.live_version_id)).encode()).hexdigest()
@@ -141,7 +143,7 @@ def search(s: Session, project: Project, query: str, k: int = 4) -> list[dict]:
 
 
 def page_by_norm(s: Session, project: Project) -> dict[str, Page]:
-    return {norm_url(p.url): p for p in s.scalars(select(Page).where(Page.project_id == project.id))}
+    return {norm_url(p.url): p for p in s.scalars(select(Page).where(Page.project_id == project.id, Page.kind != "archived"))}
 
 
 _SKIP_EXT = (".pdf", ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".zip", ".mp4", ".mp3", ".css", ".js", ".xml", ".ico")

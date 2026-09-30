@@ -55,6 +55,7 @@ class Sandbox:
     max_results: int = 5
     urls: dict[str, str] = field(default_factory=dict)  # norm_url -> the page's real URL
     expose: bool = False  # guarantee the best-matching client page is among the search results (both arms)
+    expose_rank: int = 2  # ...at this position (1 = first result). Identical in both arms.
     _index: object = None
 
     def _client_index(self):
@@ -113,6 +114,7 @@ class ToolSession:
     retrieved: list[str] = field(default_factory=list)
     injected: bool = False
     exposed: bool = False  # the assistant was shown a client page (naturally or via expose=True)
+    fetched: bool = False  # the assistant actually opened a client page
     last_error: str = ""
 
     def web_search(self, query: str) -> list[dict]:
@@ -137,11 +139,11 @@ class ToolSession:
                 self.exposed = True
             self.retrieved.append(h.url)
             out.append({"url": h.url, "title": h.title, "snippet": snippet})
-        if sb.expose and not any(same_site(r["url"], sb.client_domain) for r in out):
-            best = sb.best_client_page(query)
-            if best:
+        if sb.expose:
+            best = sb.best_client_page(query)  # the page that best answers this query, which may be a brand-new one
+            if best and norm_url(best[0]) not in {norm_url(r["url"]) for r in out}:
                 url, title, snippet = best
-                out.insert(min(1, len(out)), {"url": url, "title": title, "snippet": snippet})  # always 2nd, in both arms
+                out.insert(min(max(sb.expose_rank, 1) - 1, len(out)), {"url": url, "title": title, "snippet": snippet})  # same slot in both arms
                 self.retrieved.append(url)
                 self.exposed = True
                 self.injected |= norm_url(url) in sb.modified
@@ -153,7 +155,7 @@ class ToolSession:
         self.retrieved.append(url)
         if key in self.sandbox.pages:
             self.injected |= key in self.sandbox.modified
-            self.exposed = True
+            self.exposed = self.fetched = True
             title, text = self.sandbox.pages[key]
         else:
             try:

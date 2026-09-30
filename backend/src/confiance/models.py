@@ -25,6 +25,7 @@ class Project(Base):
     deploy_config: Mapped[dict] = mapped_column(default=dict)
     current_brief_version: Mapped[int] = mapped_column(default=0)
     kb_version: Mapped[int] = mapped_column(default=0)
+    settings: Mapped[dict] = mapped_column(default=dict)  # loop limits, exposure, tracking focus (see settings.py)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
@@ -48,6 +49,10 @@ class Page(Base):
     url: Mapped[str] = mapped_column(String(1000))
     source_path: Mapped[str | None] = mapped_column(String(1000), default=None)  # file in client repo
     live_version_id: Mapped[int | None] = mapped_column(default=None)
+    kind: Mapped[str] = mapped_column(String(10), default="page")  # page | file (llms.txt etc.)
+    page_type: Mapped[str] = mapped_column(String(20), default="other")  # home|product|category|blog|about|contact|faq|other
+    is_new: Mapped[bool] = mapped_column(default=False)  # proposed by Confiance, not on the live site yet
+    origin: Mapped[str] = mapped_column(String(10), default="crawl")  # crawl | proposed
 
 
 class PageVersion(Base):
@@ -141,6 +146,8 @@ class ChangeProposal(Base):
     # proposed | blocked | candidate | approved | rejected | deployed
     status: Mapped[str] = mapped_column(String(20), default="proposed")
     guard_report: Mapped[dict] = mapped_column(default=dict)
+    loop: Mapped[int] = mapped_column(default=0)  # which optimization loop produced it
+    kind: Mapped[str] = mapped_column(String(12), default="edit")  # edit | new_page
     base_version_id: Mapped[int | None] = mapped_column(default=None)
     candidate_version_id: Mapped[int | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
@@ -219,3 +226,76 @@ class UsageRecord(Base):
     cache_read_tokens: Mapped[int] = mapped_column(default=0)
     cache_write_tokens: Mapped[int] = mapped_column(default=0)
     cost_usd: Mapped[float] = mapped_column(default=0.0)
+
+
+class Product(Base):
+    """A product / SKU the business wants to rank for, tracked separately from brand visibility."""
+
+    __tablename__ = "products"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"))
+    name: Mapped[str] = mapped_column(String(300))
+    sku: Mapped[str] = mapped_column(String(100), default="")
+    url: Mapped[str] = mapped_column(String(1000), default="")
+    category: Mapped[str] = mapped_column(String(200), default="")
+    brand: Mapped[str] = mapped_column(String(200), default="")
+    price: Mapped[str] = mapped_column(String(50), default="")
+    attributes: Mapped[dict] = mapped_column(default=dict)
+    queries: Mapped[list] = mapped_column(default=list)  # [{"id": "p3.1", "text": "...", "kind": "category|use_case|comparison|specific"}]
+    source: Mapped[str] = mapped_column(String(12), default="manual")  # detected | manual | csv
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class SiteAudit(Base):
+    __tablename__ = "site_audits"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"))
+    score: Mapped[int] = mapped_column(default=0)
+    data: Mapped[dict] = mapped_column(default=dict)  # discovery (robots/sitemap/llms.txt), findings, page types
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class RunLoop(Base):
+    """One pass of draft -> test -> decide inside a run."""
+
+    __tablename__ = "run_loops"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"))
+    n: Mapped[int]
+    status: Mapped[str] = mapped_column(String(12), default="drafting")  # drafting | testing | done
+    proposal_ids: Mapped[list] = mapped_column(default=list)  # the active candidate set this loop tested
+    batch_id: Mapped[int | None] = mapped_column(default=None)
+    delta: Mapped[dict] = mapped_column(default=dict)  # paired result vs the baseline
+    metrics: Mapped[dict] = mapped_column(default=dict)  # funnel rates for this loop's candidate arm
+    decision: Mapped[str] = mapped_column(String(20), default="")  # continue | stop:<reason>
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class PlanAction(Base):
+    """One step of the improvement plan. Status is tracked by the person doing the work."""
+
+    __tablename__ = "plan_actions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"))
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("runs.id"), default=None)
+    seq: Mapped[int] = mapped_column(default=0)
+    category: Mapped[str] = mapped_column(String(20))  # content | technical | structured_data | off_page | products | measurement
+    priority: Mapped[str] = mapped_column(String(3), default="P2")  # P0 (do first) .. P3
+    title: Mapped[str] = mapped_column(String(300))
+    why: Mapped[str] = mapped_column(Text, default="")
+    steps: Mapped[list] = mapped_column(default=list)
+    draft: Mapped[dict] = mapped_column(default=dict)  # {"label","language","content"}: ready-to-use text/code
+    targets: Mapped[list] = mapped_column(default=list)  # question / product ids this helps
+    impact: Mapped[str] = mapped_column(String(8), default="medium")
+    effort: Mapped[str] = mapped_column(String(8), default="medium")
+    owner: Mapped[str] = mapped_column(String(30), default="website owner")
+    timeframe: Mapped[str] = mapped_column(String(40), default="")
+    verify: Mapped[str] = mapped_column(Text, default="")
+    evidence: Mapped[list] = mapped_column(default=list)
+    source: Mapped[str] = mapped_column(String(10), default="audit")  # audit | research | ai | loop
+    fp: Mapped[str] = mapped_column(String(16), default="")  # fingerprint, so status carries over between rounds
+    status: Mapped[str] = mapped_column(String(10), default="todo")  # todo | doing | done | dismissed
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)

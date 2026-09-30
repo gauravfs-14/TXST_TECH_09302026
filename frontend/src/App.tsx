@@ -1,60 +1,78 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
-import { Banner, Button, Icon, useToast } from "./ui";
-import { Activity } from "./screens/Activity";
-import { Home } from "./screens/Home";
-import { Improvements } from "./screens/Improvements";
-import { Settings } from "./screens/Settings";
-import { Setup } from "./screens/Setup";
-import { Welcome } from "./screens/Welcome";
+import { useApi, useLocal } from "./hooks";
+import { Badge, Banner, Button, Icon, IconName, Select, Skeleton, Toaster } from "./ui";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import Activity from "./pages/Activity";
+import Optimize from "./pages/Optimize";
+import Overview from "./pages/Overview";
+import Plan from "./pages/Plan";
+import Products from "./pages/Products";
+import Reports from "./pages/Reports";
+import Settings from "./pages/Settings";
+import Setup from "./pages/Setup";
+import Site from "./pages/Site";
+import Visibility from "./pages/Visibility";
+import { Welcome } from "./pages/Welcome";
 
-type Tab = "home" | "improvements" | "activity" | "settings";
-const TABS: [Tab, string][] = [["home", "Home"], ["improvements", "Improvements"], ["activity", "Activity"], ["settings", "Settings"]];
+export type View = "overview" | "visibility" | "optimize" | "plan" | "site" | "products" | "reports" | "activity" | "settings";
+export type Go = (v: View, ctx?: any) => void;
+const NAV: { group?: string; id: View; label: string; icon: IconName }[] = [
+  { group: "Measure", id: "overview", label: "Overview", icon: "home" }, { id: "visibility", label: "Visibility", icon: "eye" }, { id: "products", label: "Products", icon: "tag" }, { id: "site", label: "Site health", icon: "globe" },
+  { group: "Improve", id: "optimize", label: "Optimize", icon: "loop" }, { id: "plan", label: "Plan", icon: "list" }, { id: "reports", label: "Reports", icon: "file" },
+  { group: "Manage", id: "activity", label: "Activity", icon: "clock" }, { id: "settings", label: "Settings", icon: "gear" },
+];
 
 export default function App() {
   const [keys, setKeys] = useState<Record<string, boolean> | null>(null);
   const [projects, setProjects] = useState<any[] | null>(null);
-  const [pid, setPid] = useState<number | null>(() => Number(localStorage.getItem("confiance.project")) || null);
-  const [tab, setTab] = useState<Tab>("home");
+  const [pid, setPid] = useLocal<number | null>("confiance.project", null);
+  const [view, setView] = useLocal<View>("confiance.view", "overview");
+  const [ctx, setCtx] = useState<any>(null);
   const [adding, setAdding] = useState(false);
-  const [focusRun, setFocusRun] = useState<number | null>(null);
-  const [alerts, setAlerts] = useState(0);
   const [down, setDown] = useState(false);
-  const { toast, say } = useToast();
-
   const loadKeys = useCallback(() => api("/setup/status").then(k => { setKeys(k); setDown(false); }).catch(() => setDown(true)), []);
   const loadProjects = useCallback(() => api("/projects").then(setProjects).catch(() => setDown(true)), []);
   useEffect(() => { loadKeys(); loadProjects(); }, []);
   useEffect(() => { if (projects?.length && !projects.some(p => p.id === pid)) setPid(projects[0].id); }, [projects]);
-  useEffect(() => { if (pid) localStorage.setItem("confiance.project", String(pid)); }, [pid]);
-  useEffect(() => { const f = () => api("/alerts?unacknowledged=true").then(a => setAlerts(a.filter((x: any) => x.kind.startsWith("drift")).length)).catch(() => {}); f(); const t = setInterval(f, 30000); return () => clearInterval(t); }, []);
 
   const project = projects?.find(p => p.id === pid) ?? null;
-  const ready = keys && keys.llm && keys.search;
-  const setupDone = project && project.brief_version > 0;
+  const ready = !!keys && keys.llm && keys.search;
+  const setupDone = !!project && project.brief_version > 0;
+  const ov = useApi<any>(ready && setupDone ? `/projects/${pid}/overview` : null, { poll: 20000 });
+  const alerts = useApi<any[]>(ready ? "/alerts?unacknowledged=true" : null, { poll: 30000 });
+  const go: Go = (v, c) => { setAdding(false); setCtx(c ?? null); setView(v); window.scrollTo({ top: 0 }); };
+  const open = ov.data?.plan_open?.P0 ?? 0;
+  const driftAlerts = (alerts.data ?? []).filter((a: any) => a.kind?.startsWith("drift")).length;
 
   let body;
-  if (down) body = <div className="narrow"><Banner kind="bad"><b>We can't reach the Confiance service.</b><br />Please make sure it is running, then reload this page.</Banner><Button onClick={() => location.reload()}>Reload</Button></div>;
-  else if (!keys || !projects) body = <p className="muted center">Loading…</p>;
-  else if (!ready) body = <Welcome status={keys} onReady={loadKeys} />;
-  else if (adding || !setupDone) body = (<Setup key={adding ? "new" : project?.id ?? "first"} project={adding ? null : project}
-    onCreated={id => setPid(id)} onDone={id => { setAdding(false); loadProjects().then(() => { setPid(id); setTab("home"); say("You're all set. Press “Find improvements” to begin."); }); }} />);
-  else if (tab === "home") body = <Home project={project} alertsCount={alerts} goto={t => setTab(t as Tab)} onReview={id => { setFocusRun(id); setTab("improvements"); }} />;
-  else if (tab === "improvements") body = <Improvements projectId={project.id} focusRun={focusRun} onFocusDone={() => setFocusRun(null)} />;
-  else if (tab === "activity") body = <Activity projectId={project.id} />;
-  else body = <Settings project={project} onChanged={loadProjects} />;
-
+  if (down) body = <div className="page"><Banner kind="bad"><b>We can't reach the Confiance service.</b><br />Please make sure it is running, then reload this page.</Banner><div className="mt-4"><Button onClick={() => location.reload()}>Reload</Button></div></div>;
+  else if (!keys || !projects) body = <div className="page"><Skeleton h={36} w={260} /><div className="mt-4"><Skeleton h={180} /></div></div>;
+  else if (!ready) body = <div className="page"><Welcome status={keys} onReady={loadKeys} /></div>;
+  else if (adding || !setupDone) body = <div className="page"><Setup key={adding ? "new" : project?.id ?? "first"} project={adding ? null : project} onCreated={id => setPid(id)}
+    onDone={id => { setAdding(false); loadProjects().then(() => { setPid(id); go("overview"); }); }} /></div>;
+  else {
+    const P = { project, go, ctx, reload: loadProjects };
+    body = view === "overview" ? <Overview {...P} /> : view === "visibility" ? <Visibility {...P} /> : view === "optimize" ? <Optimize {...P} /> : view === "plan" ? <Plan {...P} /> : view === "site" ? <Site {...P} />
+      : view === "products" ? <Products {...P} /> : view === "reports" ? <Reports {...P} /> : view === "activity" ? <Activity {...P} /> : <Settings {...P} />;
+  }
   const showNav = ready && setupDone && !adding && !down;
-  return (<>
-    <header className="top"><div className="top-in">
-      <button className="brand" onClick={() => { setAdding(false); setTab("home"); }} aria-label="Confiance home"><Icon n="leaf" size={24} />CONFIANCE</button>
-      {showNav && (<nav className="tabs" aria-label="Main">{TABS.map(([id, label]) => (
-        <button key={id} className={`tab ${tab === id ? "on" : ""}`} onClick={() => setTab(id)} aria-current={tab === id ? "page" : undefined}>{label}{id === "settings" && alerts > 0 && <span className="dot" aria-label="needs attention" />}</button>))}</nav>)}
-      {showNav && projects && (<div className="row" style={{ gap: ".5rem" }}>
-        {projects.length > 1 && <select style={{ width: "auto" }} value={pid ?? ""} onChange={e => setPid(Number(e.target.value))} aria-label="Choose business">{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
-        <Button kind="text" size="small" onClick={() => setAdding(true)}><Icon n="plus" size={16} />Add a business</Button></div>)}
-    </div></header>
-    <main>{body}</main>
-    {toast}
-  </>);
+  return (<TooltipProvider><div className="grid min-h-screen max-[899px]:grid-rows-[auto_1fr] min-[900px]:grid-cols-[248px_minmax(0,1fr)]">
+    <aside aria-label="Main navigation" className="flex items-center max-[899px]:[scrollbar-width:none] gap-1 overflow-x-auto border-b bg-[color-mix(in_srgb,var(--card)_55%,var(--background))] px-2.5 py-2 min-[900px]:sticky min-[900px]:top-0 min-[900px]:h-screen min-[900px]:flex-col min-[900px]:items-stretch min-[900px]:overflow-y-auto min-[900px]:overflow-x-visible min-[900px]:border-r min-[900px]:border-b-0 min-[900px]:px-3 min-[900px]:pt-[18px] min-[900px]:pb-3.5">
+      <button onClick={() => go("overview")} aria-label="Confiance home" className="flex items-center gap-2 rounded-md py-1 pr-2.5 pl-0.5 text-left font-serif text-[1.05rem] font-semibold tracking-[.16em] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 min-[900px]:px-2.5 min-[900px]:pb-3.5">
+        <span className="text-primary"><Icon n="leaf" size={24} /></span><span className="max-[899px]:hidden">CONFIANCE</span></button>
+      {showNav && <>
+        {projects && projects.length > 1 && <Select value={String(pid ?? "")} onChange={v => { setPid(Number(v)); go("overview"); }} label="Choose business" options={projects.map(p => ({ value: String(p.id), label: p.name }))} className="mb-2 max-[899px]:w-40" />}
+        {NAV.map(n => (<div key={n.id} className="contents">{n.group && <div className="px-3 pt-3.5 pb-1 text-[0.7rem] tracking-[.09em] text-faint uppercase max-[899px]:hidden">{n.group}</div>}
+          <Button kind="text" onClick={() => go(n.id)} aria-current={view === n.id ? "page" : undefined}
+            className={cn("relative justify-start gap-2.5 px-3 max-[899px]:px-2.5 min-[900px]:w-full", view === n.id && "bg-card font-semibold text-foreground shadow-sm ring-1 ring-border hover:bg-card")}>
+            <Icon n={n.icon} size={19} /><span className={cn(view !== n.id && "max-[899px]:hidden")}>{n.label}</span>
+            {n.id === "plan" && open > 0 && <Tooltip><TooltipTrigger asChild><Badge tone="clay" className="ml-auto">{open}</Badge></TooltipTrigger><TooltipContent>Actions to do first</TooltipContent></Tooltip>}
+            {n.id === "settings" && driftAlerts > 0 && <Badge tone="clay" className="ml-auto">!</Badge>}</Button></div>))}
+        <div className="mt-auto pt-2.5 max-[899px]:hidden"><Button kind="text" size="small" onClick={() => setAdding(true)}><Icon n="plus" size={16} />Add a business</Button></div></>}
+    </aside>
+    <main className="min-w-0">{body}</main>
+    <Toaster />
+  </div></TooltipProvider>);
 }

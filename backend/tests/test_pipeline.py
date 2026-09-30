@@ -29,6 +29,7 @@ def setup(monkeypatch):
 
     monkeypatch.setattr(llm, "json_call", json_call)
     orch.provider_factory = lambda: OfflineCorpusSearch([("https://acme.test/", "Local plumbers", ACME), RIVAL])
+    orch.html_fetcher = lambda u: "<html><head><title>Rival</title></head><body><h1>Rival plumbing</h1><h2>What we fix</h2><p>Leaks and pipes.</p></body></html>"  # no network in tests
 
     with session_scope() as s:
         p = Project(name="Acme Plumbing", domain="acme.test", engines=[{"name": "offline"}], deploy_config={"type": "export", "out_dir": str(s.bind.url.database) + "-exports"})
@@ -207,7 +208,7 @@ def test_a_running_round_can_be_stopped_and_a_new_one_started(setup, monkeypatch
     monkeypatch.setattr(llm, "chat", chat)
     rid = orch.start_run(setup)
     st = orch.advance(rid)
-    assert st["status"] == "cancelled" and st["stage"] == "optimize" and pressed["n"] == 1
+    assert st["status"] == "cancelled" and st["stage"] == "loop" and pressed["n"] == 1
     rid2 = orch.start_run(setup)  # 'cancelled' never blocks a new round
     assert rid2 != rid
 
@@ -252,4 +253,11 @@ def test_a_quick_round_uses_only_the_first_questions(setup, monkeypatch):
                  for r in s.scalars(select(SimulationResult).where(SimulationResult.batch_id == b.id))}
     assert asked == {"q1", "q2", "q3", "q4"}
     from confiance.pipeline import plans
-    assert plans.estimate_calls(8, "quick")["now"] == plans.estimate_calls(4, "quick")["now"] < plans.estimate_calls(8, "thorough")["now"]
+    assert plans.estimate_calls(4, "quick")["now"] < plans.estimate_calls(4, "thorough")["now"]
+    assert plans.estimate_calls(4, "quick", loops=1)["now"] < plans.estimate_calls(4, "quick", loops=3)["now"]  # more loops can cost more, never less
+    from fastapi.testclient import TestClient
+    from confiance.api.app import app
+    with TestClient(app) as c:  # the API caps a Quick round at its first 4 questions
+        p = c.get(f"/api/projects/{setup}/plans?loops=2").json()
+        quick = next(x for x in p["plans"] if x["id"] == "quick")
+        assert p["questions"] == 6 and quick["now"] == plans.estimate_calls(4, "quick", loops=2)["now"]

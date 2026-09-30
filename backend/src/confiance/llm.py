@@ -65,6 +65,7 @@ class LLMResult:
     tool_calls: list[ToolCall] = field(default_factory=list)
     message: dict = field(default_factory=dict)  # assistant message, ready to append to history
     finish_reason: str = ""
+    truncated: bool = False  # still hit the length limit after one retry with more room
 
 
 @lru_cache
@@ -86,6 +87,7 @@ def model_for(role: str = "optimizer") -> str:
     return m
 
 
+MAX_TOKENS_CEILING = 48000
 _THINK = re.compile(r"<think>.*?</think>", re.S)
 
 
@@ -366,6 +368,12 @@ def _consume(kwargs: dict, component: str, model: str, messages: list[dict]) -> 
     return LLMResult(text=text, tool_calls=calls, message=history, finish_reason=finish)
 
 
+_ASKING = {"kb.extract": "Learning what your business does", "questions.suggest": "Thinking up questions your customers might ask",
+           "products.queries": "Writing shopper questions for your products", "persona.generate": "Imagining your customers",
+           "persona.phrase": "Phrasing the questions the way real people would", "report.narrative": "Writing the summary of your results",
+           "plan.tailor": "Tailoring the plan to your business", "optimizer": "Drafting improvements"}
+
+
 def chat(component: str, messages: list[dict], *, tools: list[dict] | None = None, model: str | None = None,
          role: str = "optimizer", max_tokens: int = 16000, response_format: dict | None = None) -> LLMResult:
     """One model call. Thinking stays at the provider's default unless `llm_reasoning_effort` is set."""
@@ -378,27 +386,37 @@ def chat(component: str, messages: list[dict], *, tools: list[dict] | None = Non
         kwargs["response_format"] = response_format
     if s.llm_reasoning_effort and "reasoning_effort" not in _UNSUPPORTED:
         kwargs["reasoning_effort"] = s.llm_reasoning_effort
-    def run(m: str) -> LLMResult:
-        kw = {**kwargs, "model": m}
+    def run(m: str, mt: int) -> LLMResult:
+        kw = {**kwargs, "model": m, "max_tokens": mt}
+        activity.emit(_ASKING.get(component, "Asking the AI model") + "…", "ask")
         rid, t0 = activity.llm_started(), time.monotonic()
         try:
             result = _with_pacing(lambda: _consume(kw, component, m, messages))
         finally:
             activity.llm_finished(rid)
         activity.emit(f"AI call finished: {component} on {m} ({time.monotonic() - t0:.1f}s)", "llm",
-                      {"component": component, "model": m, "seconds": round(time.monotonic() - t0, 1),
+                      {"component": component, "model": m, "seconds": round(time.monotonic() - t0, 1), "finish": result.finish_reason,
                        "tool_calls": [c.name for c in getattr(result, "tool_calls", [])]})
         return result
 
+    def with_room(m: str) -> LLMResult:
+        # Thinking tokens count against the limit, so a long think can cut the answer off. Ask once more with more room.
+        res = run(m, max_tokens)
+        if res.finish_reason == "length" and max_tokens < MAX_TOKENS_CEILING:
+            activity.emit("An answer hit its length limit, so asking again with more room.", "warn")
+            res = run(m, min(max_tokens * 2, MAX_TOKENS_CEILING))
+        res.truncated = res.finish_reason == "length"
+        return res
+
     try:
-        return run(model)
+        return with_room(model)
     except LLMQuotaError:
         # Quotas are per model, and the main model's free allowance is usually the smaller one. If a separate fast
         # model is set, carry on with it rather than failing the whole round.
         fallback = s.llm_worker_model
         if role == "optimizer" and fallback and fallback != model:
             activity.emit(f"The main model's free daily limit is used up, so carrying on with the fast model ({fallback}).", "wait")
-            return run(fallback)
+            return with_room(fallback)
         raise
 
 

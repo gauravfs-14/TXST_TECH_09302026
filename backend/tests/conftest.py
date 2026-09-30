@@ -15,6 +15,7 @@ def env(tmp_path, monkeypatch):
               "CONFIANCE_TAVILY_API_KEY", "CONFIANCE_SEARXNG_URL"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("CONFIANCE_SAMPLES_PER_QUESTION", "2")
+    monkeypatch.setenv("CONFIANCE_LIGHTHOUSE", "off")
     config.get_settings.cache_clear()
     db.reset_engine()
     db.init_db()

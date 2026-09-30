@@ -52,10 +52,47 @@ def reset_engine() -> None:
     _SessionLocal = None
 
 
+def _ddl_default(col) -> str:
+    """A constant DEFAULT for an ALTER TABLE ADD COLUMN, taken from the model's Python-side default."""
+    d = col.default.arg if col.default is not None and col.default.is_scalar else None
+    if d is None and col.default is not None and callable(getattr(col.default, "arg", None)):
+        name = getattr(col.default.arg, "__name__", "")
+        return " DEFAULT '{}'" if name == "dict" else " DEFAULT '[]'" if name == "list" else ""
+    if isinstance(d, bool):
+        return f" DEFAULT {int(d)}"
+    if isinstance(d, (int, float)):
+        return f" DEFAULT {d}"
+    if isinstance(d, str):
+        return " DEFAULT '" + d.replace("'", "''") + "'"
+    return ""
+
+
+def migrate() -> list[str]:
+    """Additive upgrades for existing databases: add columns the models have and the tables lack.
+    Never drops, renames or rewrites anything, so an older database keeps all of its data."""
+    from sqlalchemy import inspect, text
+
+    engine = get_engine()
+    insp = inspect(engine)
+    added = []
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in have:
+                    ddl = col.type.compile(dialect=engine.dialect)
+                    conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl}{_ddl_default(col)}'))
+                    added.append(f"{table.name}.{col.name}")
+    return added
+
+
 def init_db() -> None:
     from . import models  # noqa: F401  (register tables)
 
-    Base.metadata.create_all(get_engine())
+    Base.metadata.create_all(get_engine())  # creates missing tables
+    migrate()  # adds missing columns to tables that already exist
 
 
 _active: contextvars.ContextVar[tuple[Session, int] | None] = contextvars.ContextVar("db_session", default=None)

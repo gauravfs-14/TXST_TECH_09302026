@@ -41,7 +41,7 @@ class OpenAIEngine(Engine):
         res = None
         for step in range(self.max_steps + 1):
             last = step == self.max_steps
-            res = llm.chat("engine:openai", messages, tools=None if last else specs, model=self.model, role="engine", max_tokens=8000)
+            res = llm.chat("engine:openai", messages, tools=None if last else specs, model=self.model, role="engine", max_tokens=12000)
             if not res.tool_calls and step == 0 and not last:
                 # Models often answer from memory. This assistant is meant to be search-enabled, so ask once.
                 messages.append(res.message)
@@ -52,7 +52,7 @@ class OpenAIEngine(Engine):
             messages.append(res.message)
             for c in res.tool_calls:
                 messages.append({"role": "tool", "tool_call_id": c.id, "content": tools.execute(c.name, c.args)})
-        return EngineAnswer(text=res.text, model_id=self.model, steps=step + 1, raw_shape=["choices", "message"])
+        return EngineAnswer(text=res.text, model_id=self.model, steps=step + 1, raw_shape=["choices", "message"], truncated=res.truncated)
 
     def native(self, convo: list[Turn]) -> EngineAnswer:
         if not self.supports_native:

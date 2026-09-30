@@ -63,7 +63,15 @@ def _hidden_count(soup: BeautifulSoup) -> int:
 
 
 def _numbers(text: str) -> set[str]:
-    return {n.rstrip(".,").replace(",", "") for n in _NUMBER.findall(text)}
+    """Numbers that could be claims (statistics, prices, counts, years). Bare integers 0-10 are ordinary
+    prose ('step 3', 'top 5', 'lesson 2') and are ignored, or every list would look like fabrication."""
+    out = set()
+    for n in _NUMBER.findall(text):
+        n = n.rstrip(".,").replace(",", "")
+        if re.fullmatch(r"\d", n) or n == "10":
+            continue
+        out.add(n)
+    return out
 
 
 def _text_with_jsonld(html: str) -> str:

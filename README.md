@@ -49,6 +49,18 @@ Developers: `cd backend && uv run pytest` (67 tests, no network or keys). `backe
 throwaway database with a scripted practice round (fake data) so the app can be explored with nothing connected.
 Advanced settings are `CONFIANCE_*` env vars (`backend/src/confiance/config.py`).
 
+## The pipeline
+
+Each round runs: **requirements → research → baseline → improvement loop → plan & report → your review → publish → real-world check.**
+
+- **Requirements / discovery**: reads robots.txt, sitemap(s) and llms.txt, finds pages and products, audits the site (score, findings, fixes).
+- **Research**: real search (never simulated) shows which questions already find you, who wins instead, and what their pages do.
+- **Loop**: draft changes (including brand-new pages) → test in the sandbox, where the search tool's results are rewritten to contain the modified text → learn from what didn't work → repeat. The number of loops is a hard, configurable limit (1 to 10, default 3) and the loop also stops early on a plateau. The best loop, not just the last, is what you review.
+- **Plan & report**: a prioritized, tailored plan (with ready-to-use drafts for robots.txt, sitemap, llms.txt, JSON-LD, page briefs) and a full report (HTML/Markdown), included in the download package.
+- **Two things are measured separately**: findability in real search, and usefulness once found (sandbox). Brand questions and product/SKU questions are tracked separately.
+
+Upgrading from an earlier version: restart the API once; existing data is migrated automatically.
+
 ## How the sandbox works (counterfactual injection)
 
 Search is a tool call, so the sandbox intercepts it in code during the agent loop. In **controlled mode**

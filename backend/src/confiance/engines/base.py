@@ -44,6 +44,8 @@ class EngineAnswer:
     model_id: str = ""
     injected: bool = False
     exposed: bool = False  # a client page was in front of the assistant
+    fetched: bool = False  # ...and the assistant opened it
+    truncated: bool = False  # the answer was cut off by the length limit
     steps: int = 0
     error: str | None = None
     latency_ms: int = 0
@@ -87,14 +89,14 @@ class Engine(ABC):
             if mode == "controlled":
                 assert tools is not None
                 ans = self.controlled(convo, tools)
-                ans.queries, ans.injected, ans.exposed = list(tools.queries), tools.injected, tools.exposed
+                ans.queries, ans.injected, ans.exposed, ans.fetched = list(tools.queries), tools.injected, tools.exposed, tools.fetched
                 ans.retrieved_urls = list(dict.fromkeys(tools.retrieved))
             else:
                 ans = self.native(convo)
         except Exception as e:  # recorded, never crashes a batch
             ans = EngineAnswer(error=f"{type(e).__name__}: {e}", model_id=self.model)
             if tools is not None:
-                ans.queries, ans.injected, ans.exposed = list(tools.queries), tools.injected, tools.exposed
+                ans.queries, ans.injected, ans.exposed, ans.fetched = list(tools.queries), tools.injected, tools.exposed, tools.fetched
         ans.latency_ms = int((time.monotonic() - t0) * 1000)
         if not ans.citations and ans.text:
             ans.citations = urls_in(ans.text)

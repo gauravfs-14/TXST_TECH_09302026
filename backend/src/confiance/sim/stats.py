@@ -34,7 +34,7 @@ def aggregate(rows: list[dict]) -> dict:
         n = len(rs)
         sc = [r["score"] for r in rs]
         out = {"n": n, "visibility": round(mean(sc), 4), "visibility_ci": [round(x, 4) for x in bootstrap_ci(sc)]}
-        for key in ("mentioned", "cited", "retrieved", "used_page"):
+        for key in ("mentioned", "cited", "retrieved", "used_page", "exposed", "searched", "fetched", "product_mentioned", "product_cited"):
             k = sum(1 for r in rs if r["metrics"].get(key))
             lo, hi = wilson(k, n)
             out[f"{key}_rate"] = round(k / n, 4) if n else 0.0
@@ -42,13 +42,21 @@ def aggregate(rows: list[dict]) -> dict:
         out["errors"] = sum(1 for r in rs if not r["metrics"].get("answered"))
         return out
 
-    by_engine, by_question = defaultdict(list), defaultdict(list)
+    from .products import product_id_of, track_of
+
+    by_engine, by_question, by_track, by_product = defaultdict(list), defaultdict(list), defaultdict(list), defaultdict(list)
     for r in rows:
         by_engine[r["engine"]].append(r)
         by_question[r["question_id"]].append(r)
+        by_track[track_of(r["question_id"])].append(r)
+        pid = product_id_of(r["question_id"])
+        if pid is not None:
+            by_product[str(pid)].append(r)
     return {"overall": summarize(rows),
             "by_engine": {k: summarize(v) for k, v in by_engine.items()},
-            "by_question": {k: summarize(v) for k, v in by_question.items()}}
+            "by_question": {k: summarize(v) for k, v in by_question.items()},
+            "by_track": {k: summarize(v) for k, v in by_track.items()},
+            "by_product": {k: summarize(v) for k, v in by_product.items()}}
 
 
 def paired_delta(base: list[dict], cand: list[dict]) -> dict:

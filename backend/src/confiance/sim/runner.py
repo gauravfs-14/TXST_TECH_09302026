@@ -12,12 +12,13 @@ from ..config import get_settings
 from ..context import submit
 from ..db import session_scope
 from ..engines import Turn, build_engine
-from ..models import Page, Project, SimulationBatch, SimulationResult
+from ..models import Page, Product, Project, SimulationBatch, SimulationResult
 from ..search.base import SearchCache
 from ..search.sandbox import Sandbox
 from ..search.providers import build_provider
 from ..textutil import domain_of, html_to_text, norm_url
 from . import stats
+from .products import product_id_of
 from .metrics import Target, score, visibility_score
 
 
@@ -28,10 +29,10 @@ class PromptSet:
 
 
 def build_sandbox(s: Session, project: Project, overrides: dict[int, str] | None = None, *,
-                  provider=None, cache: SearchCache | None = None, expose: bool = False) -> Sandbox:
+                  provider=None, cache: SearchCache | None = None, expose: bool = False, expose_rank: int = 2) -> Sandbox:
     overrides = overrides or {}
     pages, modified, urls = {}, set(), {}
-    for p in s.scalars(select(Page).where(Page.project_id == project.id)):
+    for p in s.scalars(select(Page).where(Page.project_id == project.id, Page.kind != "archived")):
         html = overrides.get(p.id) or snapshots.live_content(s, p)
         if html is None:
             continue
@@ -41,7 +42,7 @@ def build_sandbox(s: Session, project: Project, overrides: dict[int, str] | None
         if p.id in overrides:
             modified.add(key)
     return Sandbox(provider=provider or build_provider(), client_domain=project.domain, pages=pages,
-                   modified=modified, cache=cache or SearchCache(), urls=urls, expose=expose)
+                   modified=modified, cache=cache or SearchCache(), urls=urls, expose=expose, expose_rank=expose_rank)
 
 
 def target_for(project: Project, brief: BriefData) -> Target:
@@ -56,6 +57,9 @@ def run_batch(project: Project, brief: BriefData, run_id: int | None, arm: str, 
     engines = engines or project.engines
     target = target_for(project, brief)
     qids = set(question_ids) if question_ids else None
+    with session_scope() as s:
+        product_by_id = {p.id: {"id": p.id, "name": p.name, "sku": p.sku, "url": p.url, "brand": p.brand}
+                         for p in s.scalars(select(Product).where(Product.project_id == project.id))}
 
     tasks = []
     for eng in engines:
@@ -75,7 +79,8 @@ def run_batch(project: Project, brief: BriefData, run_id: int | None, arm: str, 
             tools = sandbox.session() if mode == "controlled" and sandbox else None
             ans = engine.run(mode, [Turn("user", text)], tools)
         page_texts = [t for _, t in sandbox.pages.values()] if (sandbox is not None and mode == "controlled") else None
-        m = score(ans, target, kb_card=kb_card, prompt=text, judge=cfg.use_llm_judge and not ans.error, page_texts=page_texts)
+        product = product_by_id.get(product_id_of(qid)) if product_id_of(qid) is not None else None
+        m = score(ans, target, kb_card=kb_card, prompt=text, judge=cfg.use_llm_judge and not ans.error, page_texts=page_texts, product=product)
         return {"engine": eng["name"], "persona_id": pid, "question_id": qid, "sample_idx": i, "prompt": text,
                 "ans": ans, "metrics": m, "score": visibility_score(m)}
 
