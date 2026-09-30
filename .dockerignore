@@ -7,7 +7,6 @@
 frontend/dist
 backend/data
 backend/*.db*
-docs
 assets
 *.md
 !backend/README.md

@@ -31,7 +31,6 @@ products, test improvements safely before anything goes live, and keep proving (
 10. [Repository layout](#-repository-layout)
 11. [Development](#-development)
 12. [Project status (MVP)](#-project-status-mvp)
-13. [Further reading](#-further-reading)
 
 ---
 
@@ -232,6 +231,11 @@ environment, content-addressed snapshots, stale-base protection, one-click rollb
 
 Everything below runs in the web app. There is no JSON, code or configuration to touch.
 
+> **About these screenshots.** They are a showcase of the features, captured on a deliberately tiny run: only
+> **2 questions** and **2 loops**, on a free-tier model. That is why the results look modest (for example
+> "inconclusive" or "no meaningful change") and why the agent found little. Real insights emerge naturally with more
+> questions, more personas and more loops (Standard and Thorough rounds, up to 10 loops).
+
 ### 1 · Measure: know where you stand
 
 <table>
@@ -411,7 +415,7 @@ The web app talks to a plain REST API under `/api` (interactive docs at `/docs` 
 
 The app needs **no configuration files**: model, key and search are entered in the UI. Advanced tuning uses
 `CONFIANCE_*` environment variables (or a `.env` next to the backend); all are defined in
-[`backend/src/confiance/config.py`](backend/src/confiance/config.py). Full reference: [docs/configuration.md](docs/configuration.md).
+[`backend/src/confiance/config.py`](backend/src/confiance/config.py)..
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -435,7 +439,6 @@ The app needs **no configuration files**: model, key and search are entered in t
 ├── Dockerfile                multi-stage image (web build → Python runtime)
 ├── docker-compose.yml        service + persistent volume
 ├── assets/                   README screenshots and diagrams
-├── docs/                     deep dives (architecture, configuration, research notes)
 ├── backend/                  FastAPI service (Python 3.13, managed by uv)
 │   ├── src/confiance/
 │   │   ├── api/              REST endpoints (app.py, simple.py, v2.py)
@@ -496,33 +499,5 @@ cd frontend && npm run build   # type-check and production build
 | Deployers | 🟡 Export package and Git draft PR are usable (static-HTML sites); the CMS/WordPress connector is written but not exposed in the app |
 | Engines | 🟡 Any OpenAI-compatible model is exposed; Claude and Gemini adapters exist but are switched off in the app |
 | Multi-user accounts, SSO, hosted multi-tenant deployment | ⬜ Not yet |
-
-### Known limitations
-
-1. **The sandbox measures content effects, not ranking effects.** Findability is checked in real search and reported
-   separately, never simulated. See [docs/measuring-improvement.md](docs/measuring-improvement.md). Only the
-   post-publish check is real evidence of ranking changes.
-2. **API ≠ consumer app.** Engines are tested through provider APIs; answers inside chatgpt.com or AI Overviews can
-   differ, and a small local model is not ChatGPT. Results with Ollama show the *mechanics* work, not how a particular
-   commercial assistant behaves. Google AI Overviews has no API and is not covered.
-3. **Only the local-model path has been run live.** Real-OpenAI native search and the deployers were written against
-   documentation and are unit-tested only.
-4. Git-PR deploy writes new HTML to the page's `source_path`, so it suits static-HTML sites. For framework-built sites
-   use the export package or a CMS connector.
-5. Retrieval is BM25 (no vector DB) and storage is SQLite by default. On Postgres, serialise audit writes (for example
-   with `pg_advisory_xact_lock`) to keep the hash chain linear under concurrency.
-6. Live measurement needs time: engines re-crawl slowly (default 72 h).
-
----
-
-## 📚 Further reading
-
-| Document | What's in it |
-|---|---|
-| [docs/architecture.md](docs/architecture.md) | Module-by-module walkthrough, data flow, extension points |
-| [docs/configuration.md](docs/configuration.md) | Every setting, how models and search are chosen |
-| [docs/measuring-improvement.md](docs/measuring-improvement.md) | What is measured, why, and how to read the results |
-| [docs/free-tier-research.md](docs/free-tier-research.md) | Free AI APIs for testing, limits and trade-offs |
-| [docs/search-integration-research.md](docs/search-integration-research.md) | Why built-in provider search is not used for experiments |
 
 <div align="center"><sub>Confiance · MVP · Built to make brands findable, citable and correctly described by AI.</sub></div>

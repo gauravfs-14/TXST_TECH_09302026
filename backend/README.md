@@ -8,6 +8,4 @@ uv run uvicorn confiance.api.app:app --port 8000     # run (serves frontend/dist
 uv run pytest                                        # 154 tests, no network or keys
 ```
 
-See the [project README](../README.md) for the product overview and one-command setup (`./run.sh`),
-[docs/architecture.md](../docs/architecture.md) for the module map and
-[docs/configuration.md](../docs/configuration.md) for settings.
+See the [project README](../README.md) for the product overview, architecture and one-command setup (`./run.sh`).
