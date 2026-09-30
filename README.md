@@ -1,131 +1,235 @@
 # CONFIANCE
 
-Agentic Generative Engine Optimization (GEO): make a client's website findable, citable and correctly
-described by AI answer engines. Today the assistant under test is any OpenAI-compatible model; more adapters
-(Claude and Gemini adapters exist in the code but are switched off in the app) plug into `engines/`.
+**Help AI assistants find your business, cite your website, and describe what you offer accurately.**
 
-```
-onboard (brief: goals + constraints) -> knowledge base -> personas -> baseline sim
-   -> optimizer agent (ReAct) -> constraint guard -> candidate sim -> paired evaluation
-   -> HUMAN APPROVAL -> deploy (git draft PR / CMS / export) -> live measurement -> next iteration
-                     drift monitor + audit trail + versioned snapshots run alongside
+Confiance is an agentic **Generative Engine Optimization (GEO)** application. It reads a business's website, tests how an AI assistant answers customer questions, proposes content improvements, and compares those changes in a sandbox before a person approves them.
+
+For example, a plumbing business can test whether an assistant mentions it for “Who can fix a leaking pipe in Austin?”, inspect the answers before and after a proposed FAQ, and download the approved changes for its website.
+
+**Start here:** [Judge walkthrough](#judge-walkthrough) · [How it works](#how-it-works) · [Tech stack](#tech-stack) · [Run locally](#run-locally) · [Limitations](#limitations)
+
+## What the application does
+
+- **Understands the website:** discovers pages through robots.txt, sitemaps, and llms.txt; builds a knowledge base; identifies products; and audits site health.
+- **Measures visibility:** checks real search results and tests brand and product questions against the configured AI model.
+- **Drafts and tests improvements:** proposes page edits, FAQs, metadata, structured data, and new pages, then compares their effect across bounded improvement loops.
+- **Keeps the owner in control:** checks proposals against protected wording and forbidden claims, shows exact changes, and requires approval before preparing delivery.
+- **Produces usable deliverables:** a prioritized improvement plan, HTML/Markdown reports, and a download package containing approved changes and supporting site files.
+- **Tracks what happens next:** schedules a live check after publication is confirmed and monitors changes in model behavior.
+
+## Judge walkthrough
+
+### Review without installing
+
+This repository documents a local setup; a hosted demo or recorded walkthrough is not linked here yet. For a quick repository review, start with the [workflow diagrams](#how-it-works), read [how to interpret results](#how-to-interpret-results), and use the [repository guide](#repository-guide) to inspect the implementation.
+
+### Walk through the application
+
+Once the app is running, open the [dashboard](http://localhost:5173/dashboard). The marketing pages at `/`, `/product`, and `/pricing` explain the product; **Open dashboard** enters the working application.
+
+1. **Connect a model.** Choose an OpenAI-compatible provider, select a model that supports tool calling, and use the connection test. Keep DuckDuckGo for search without a search API key.
+2. **Add a business.** Enter its name and public website URL. Let Confiance read the site, then review the suggested customer questions and detected products.
+3. **Set the boundaries.** Specify sentences to preserve, claims to avoid, and pages that may be edited. The current dashboard delivers improvements as downloadable files.
+4. **Start a round.** Open **Optimize**, choose brand and/or product questions, select **Quick check**, and click **Start the round**. The page shows progress and an activity feed; duration depends on the model, site, and provider limits.
+5. **Inspect the evidence.** In the completed round, compare **Summary**, **Loops**, and **Answers**. Open **Changes** to see the exact wording and any proposals blocked by the guard.
+6. **Review the deliverables.** Open **Plan** for prioritized actions and **Reports** for HTML/Markdown exports. Approving selected changes runs the pre-publication live check and prepares a downloadable package; it does not publish files to your website.
+
+For judging, the review and download steps demonstrate the core workflow. The later **The changes are now on my website** action is for confirming an actual publication and scheduling the live follow-up.
+
+| Dashboard area | What to look for |
+| --- | --- |
+| **Overview** | Business status, recent results, and recommended next steps. |
+| **Visibility** | Brand/product results and the **Discoverability** tab for real search findings. |
+| **Products** | Detected or manually added products and their shopper questions. |
+| **Site health** | Crawl findings, technical issues, and page-level checks. |
+| **Optimize** | Run setup, live progress, improvement loops, answer comparisons, and approval. |
+| **Plan** | Prioritized actions and ready-to-use drafts. |
+| **Reports** | A readable report for each round, with HTML and Markdown downloads. |
+| **Activity** | Recorded events for tracing what the system did. |
+| **Settings** | Business details, protected wording, AI connections, model health, and usage estimates. |
+
+### How to interpret results
+
+Confiance separates two questions that are easy to confuse:
+
+| Measurement | What it tells you | How to read it |
+| --- | --- | --- |
+| **Findability** | Does the site appear in real search results for the target questions? | Observed search visibility at the time of the check. |
+| **Usefulness when found** | Does the assistant use, mention, or cite the page when it is shown? | A controlled sandbox comparison of existing and proposed content. |
+| **Live follow-up** | How do answers change after the approved content is published? | A later live-web check, subject to recrawling delays and changes outside the application. |
+
+The sandbox inserts a matching business page when it is absent from search results, using the same configured insertion rank in both arms; naturally returned pages retain their positions. Existing pages use baseline or proposed snapshots, while new pages appear only in the candidate arm. Tests pair customer personas, questions, and samples and share cached search results to reduce variation from retrieval. Model responses and the matching page can still vary: inspect the paired comparisons, confidence intervals, and actual answers alongside the verdict.
+
+**A better sandbox score does not prove better search rankings.** The “uses your page” signal is based on phrase overlap, and the visibility score combines several signals; neither is a market-wide ranking or a guarantee of factual accuracy. Brand and product results are tracked separately. See [the measurement guide](docs/measuring-improvement.md).
+
+## How it works
+
+### From website to reviewed improvements
+
+```mermaid
+flowchart TD
+    A["Business website, questions, and constraints"] --> B["Discover pages and build the knowledge base"]
+    B --> C["Research real search visibility and competitors"]
+    C --> D["Run baseline answers against existing content"]
+    D --> E["Optimizer drafts structured changes"]
+    E --> F{"Pass constraint checks?"}
+    F -->|Revise within budget| E
+    F -->|Pass| G["Test candidate content in the sandbox"]
+    G --> H{"Another improvement loop?"}
+    H -->|Within limit and making progress| E
+    H -->|Stop| I["Select best loop and generate plan and report"]
+    I --> J{"Human review"}
+    J -->|Approve selected changes| K["Live-before check and download package"]
+    J -->|Skip| L["Keep existing website content"]
+    K --> M["Owner publishes and confirms changes are live"]
+    M --> N["Delayed live check and next iteration"]
 ```
 
-## Run it
+Rounds default to a maximum of **3 improvement loops**, configurable from **1 to 10**, and can stop early when progress plateaus. The best loop is selected for review. Completed stages are persisted so an interrupted run can resume without restarting the entire pipeline.
+
+### System architecture
+
+```mermaid
+flowchart LR
+    UI["React dashboard"] -->|REST API| API["FastAPI backend"]
+    API --> PIPE["Resumable optimization pipeline"]
+    PIPE --> KB["Website discovery and knowledge base"]
+    PIPE --> AGENT["Optimizer and constraint guard"]
+    PIPE --> SIM["Paired simulations and evaluation"]
+    AGENT --> LLM["Configured OpenAI-compatible models"]
+    SIM --> LLM
+    SIM --> SANDBOX["Search and page-fetch sandbox"]
+    SANDBOX --> SEARCH["Search provider and shared result cache"]
+    SANDBOX --> SNAP["Existing or candidate page snapshots"]
+    KB --> STORE[("SQLite and file storage")]
+    SNAP --> STORE
+    PIPE --> STORE
+    API --> DELIVERY["Approved exports and reports"]
+    SCHED["APScheduler"] --> MONITOR["Drift checks and live follow-up"]
+    MONITOR --> STORE
+```
+
+In controlled tests, Confiance executes the assistant's `web_search` and `fetch_page` tools. Third-party results come from the search provider; content for the business's own site comes from the stored baseline or candidate snapshots. Live measurements use the web without candidate content substitution.
+
+## Tech stack
+
+| Layer | Technologies | Purpose |
+| --- | --- | --- |
+| Frontend | React 19, TypeScript, Vite 7 | Dashboard, onboarding, and marketing pages. |
+| UI | Tailwind CSS 4, Radix UI, Lucide, Motion | Styling, accessible UI primitives, icons, and animation. |
+| Backend | Python 3.13+, FastAPI, Uvicorn, Pydantic | API, validation, configuration, and background work. |
+| Data | SQLAlchemy, SQLite, content-addressed files | Projects, runs, metrics, page versions, and audit events. |
+| AI | OpenAI-compatible client; optional Anthropic and Google SDK adapters | Tool-using agents and answer simulations. The dashboard uses the configured OpenAI-compatible endpoint. |
+| Discovery and search | HTTPX, Beautiful Soup, DuckDuckGo; optional Tavily, Brave, SearXNG | Page fetching, parsing, and search. |
+| Retrieval and scheduling | BM25, APScheduler | Knowledge-base retrieval, drift checks, and delayed measurements. |
+| Development | uv, npm, pytest, TypeScript compiler | Dependency management, backend tests, and frontend build checks. |
+
+Dependencies are declared in [frontend/package.json](frontend/package.json) and [backend/pyproject.toml](backend/pyproject.toml), with lockfiles in both directories.
+
+## Run locally
+
+### Prerequisites
+
+- **Node.js 22.12+ and npm**. The locked Vite version also supports Node.js 20.19+ within the 20.x release line.
+- **uv** and **Python 3.13+** for the backend. uv can provision a compatible Python interpreter if one is unavailable.
+- **Bash**, available on macOS/Linux or through WSL on Windows.
+- Internet access for the initial dependency installation and for real website/search requests. Real optimization also needs a reachable model with tool-calling support.
+
+### Start both services
+
+Clone or extract the repository, open a terminal in its root folder, and run:
 
 ```bash
-./start.sh        # installs what it needs, starts everything, opens http://localhost:5173
+./run.sh
 ```
 
-The frontend serves the marketing site at `/`, `/product` and `/pricing` (code in `frontend/src/landing/`),
-and the web app at `/dashboard`. The site's "Open dashboard" buttons go there.
+If an extracted ZIP does not preserve executable permissions, use `bash run.sh`.
 
-The web app walks a non-technical person through everything: connect an AI model, enter a business name and
-website address, confirm suggested customer questions, say what must never change, then press **Find
-improvements**. There is no JSON, code or configuration to touch. Settings entered in the app are stored in
-`backend/data/secrets.json` (owner-only permissions); keys are never sent back to the browser.
+The root [run.sh](run.sh) delegates to [start.sh](start.sh), which checks for uv/npm, synchronizes backend dependencies, installs frontend dependencies if `node_modules` is absent, starts both development servers, and opens the browser. Stop the services with **Ctrl+C** in that terminal.
 
-### Connecting an AI model (no paid API needed to try it)
+| Service | Local address |
+| --- | --- |
+| Marketing site | [http://localhost:5173](http://localhost:5173) |
+| Application | [http://localhost:5173/dashboard](http://localhost:5173/dashboard) |
+| Interactive API docs | [http://localhost:8000/docs](http://localhost:8000/docs) |
 
-Confiance talks to **any OpenAI-compatible endpoint**, and the same connection powers the internal agents and the
-assistant that gets tested:
+Keep ports **5173** and **8000** available. The frontend proxies `/api` requests to the backend on port 8000. This launcher runs the development environment; the repository does not currently include a container configuration.
 
-| Provider | Address | Key |
-|---|---|---|
-| Google Gemini (free tier) | `https://generativelanguage.googleapis.com/v1beta/openai/` | yes, free at aistudio.google.com/apikey |
-| Ollama (free, local) | `http://localhost:11434/v1` | none |
-| OpenAI | `https://api.openai.com/v1` | yes |
-| OpenRouter, Groq, LM Studio, vLLM, ... | their `/v1` address | usually |
+### Connect AI and search
 
-While a round runs, the app shows a real progress bar, a heartbeat (time since last activity), the current speed, and a live feed
-of what is being asked, searched, read and proposed. Speed adapts to the service's limits (see the doc below).
+Configure connections in the welcome screen or **Settings → AI & delivery**. No `.env` file is needed for the guided setup.
 
-Two model roles: a **main** model for the hard, occasional work and an optional **fast** model for the many small jobs
-(the app suggests both for Gemini). Run size (Quick / Standard / Thorough) is chosen per round and shows an estimate of AI
-requests, because free tiers allow few. Details and sources: [docs/free-tier-research.md](docs/free-tier-research.md).
+| Connection option | Configuration in the app |
+| --- | --- |
+| **Ollama** | Run a local model that supports tool calling; use `http://localhost:11434/v1`. No provider API key is required for this local connection. |
+| **Google Gemini** | Select the preset, enter your provider key, and choose a model returned by **Find my models**. |
+| **OpenAI** | Select the preset, enter your provider key, and choose a tool-capable model. |
+| **Other compatible services** | Enter the service's OpenAI-compatible base URL, credentials if required, and model name. |
 
-Pick a model that supports **tool calling** (the connection test checks this). Web search defaults to free
-DuckDuckGo, so a local model plus free search costs nothing. Tavily, Brave and self-hosted SearXNG are also supported.
-Why built-in provider search is not used for experiments: [docs/search-integration-research.md](docs/search-integration-research.md).
+The **main model** handles optimization; an optional **fast model** handles smaller jobs and the controlled assistant simulations. If no fast model is configured, the main model handles both roles. Hosted model access, quotas, and charges depend on the provider and account.
 
-Developers: `cd backend && uv run pytest` (67 tests, no network or keys). `backend/scripts/seed_demo.py` fills a
-throwaway database with a scripted practice round (fake data) so the app can be explored with nothing connected.
-Advanced settings are `CONFIANCE_*` env vars (`backend/src/confiance/config.py`).
+DuckDuckGo is the default search option and requires no search API key. Other search backends are implemented for Tavily, Brave, and SearXNG. Local models still use network access for website discovery and real search.
 
-## The pipeline
+### Data and configuration
 
-Each round runs: **requirements → research → baseline → improvement loop → plan & report → your review → publish → real-world check.**
+With the default launcher, local data is stored in:
 
-- **Requirements / discovery**: reads robots.txt, sitemap(s) and llms.txt, finds pages and products, audits the site (score, findings, fixes).
-- **Research**: real search (never simulated) shows which questions already find you, who wins instead, and what their pages do.
-- **Loop**: draft changes (including brand-new pages) → test in the sandbox, where the search tool's results are rewritten to contain the modified text → learn from what didn't work → repeat. The number of loops is a hard, configurable limit (1 to 10, default 3) and the loop also stops early on a plateau. The best loop, not just the last, is what you review.
-- **Plan & report**: a prioritized, tailored plan (with ready-to-use drafts for robots.txt, sitemap, llms.txt, JSON-LD, page briefs) and a full report (HTML/Markdown), included in the download package.
-- **Two things are measured separately**: findability in real search, and usefulness once found (sandbox). Brand questions and product/SKU questions are tracked separately.
+- `backend/confiance.db` — SQLite application data.
+- `backend/data/blobs/` — versioned page content.
+- `backend/data/secrets.json` — connection settings, saved with owner-only file permissions. Secret values are omitted from configuration API responses.
 
-Upgrading from an earlier version: restart the API once; existing data is migrated automatically.
+These runtime files are ignored by Git. Advanced settings use the `CONFIANCE_` prefix; see [config.py](backend/src/confiance/config.py) for database, storage, pacing, scheduling, and notification options.
 
-## How the sandbox works (counterfactual injection)
+### Development commands
 
-Search is a tool call, so the sandbox intercepts it in code during the agent loop. In **controlled mode**
-each engine's model runs a real ReAct loop (reason -> `web_search` / `fetch_page` -> observe -> ...) against
-tools *we* execute (`search/sandbox.py`). Third-party results come from a real search API. Results and
-fetches for the client's own domain are served from our snapshot store:
-the **baseline arm gets the live version, the candidate arm gets the modified version**. Both arms share one
-cache of real search results, and personas/questions/samples are paired, so a measured difference is
-attributable to the page change.
+Run backend tests from the repository root:
 
-**Native mode** calls a provider's own hosted search (only real OpenAI among the compatible providers). It cannot be
-intercepted, so it is used for what the real world sees. Providers without built-in search (Ollama etc.) get the same
-"real world" measurement by running the tool loop against the live web, with no snapshots swapped in.
+```bash
+cd backend
+uv run pytest
+```
 
-## Constraints: what can and cannot change
+Type-check and build the frontend from the repository root:
 
-The brief (versioned, immutable) holds `editable_url_globs`, `locked_selectors`, `locked_phrases`,
-`allowed_ops`, `forbidden_claims`, `max_change_ratio`. `optimizer/guard.py` enforces them **in code**, plus
-platform rules: no invented numbers (must appear on the page or in the KB), no hidden text, no
-instructions aimed at AI models, valid JSON-LD. A blocked proposal returns to the agent as an observation,
-so it can revise, but it cannot override the guard. The optimizer only emits structured ops
-(`optimizer/ops.py`), never raw page rewrites.
+```bash
+cd frontend
+npm ci
+npm run build
+```
 
-## Token cost controls
+The frontend build writes to `frontend/dist/`; it does not package or start the backend. If frontend dependencies change after the first launch, run `npm ci` inside `frontend/` before restarting.
 
-- One-time KB build, skipped when page content hash is unchanged; agents get a compact card, not the site.
-- The card + brief + tool list are a prompt-cache prefix for the optimizer, persona and judge calls.
-- Cheap model (Haiku) for personas, phrasing and judging; strong model only for the optimizer.
-- Stages persist output, so a resumed run never repeats finished (paid) stages.
-- Every call lands in `usage_records` (per component / run / model) - see the **cost** tab.
+The [demo seed script](backend/scripts/seed_demo.py) is a developer fixture with scripted data and an offline engine. Its results are synthetic, not evidence of real visibility gains; use a separate database and storage paths when experimenting with it.
 
-## Safety, audit, versioning
+## Review controls and observability
 
-- **Audit**: append-only, hash-chained (`audit.py`); `GET /api/audit/verify` detects any edit or deletion.
-  Every tool call, guard verdict, approval, deploy and alert is logged.
-- **Snapshots**: page content is stored content-addressed and never overwritten; briefs are versioned.
-  Deploy refuses if the live page changed since the proposal (no clobbering client edits).
-  Rollback re-deploys the previous version as a new version, so history is only ever appended.
-- **Approval gate is mandatory**: nothing deploys unapproved. PR / CMS-draft deploys stay `draft_open`
-  until a human confirms it is live, and only then does the live pointer move and measurement start.
+- **Constraint checks:** structured edits pass through a code-level guard for editable URLs, locked phrases/selectors, forbidden claims, change limits, unsupported numbers, hidden text, model-directed instructions, and JSON-LD parsing. These checks do not establish factual truth.
+- **Explicit approval:** only approved proposals enter delivery. Downloading an export or opening a draft does not mark content as live; publication must be confirmed separately.
+- **Version history:** content-addressed snapshots and versioned briefs preserve inputs. Delivery checks proposals against the stored live version, and rollback creates a new history entry.
+- **Traceability:** activity feeds, token usage records, and a hash-chained audit log expose the work behind a result. `GET /api/audit/verify` checks the stored chain's integrity.
+- **Bounded work:** run-size choices, loop limits, request pacing, cached knowledge-base content, and persisted stages help control model usage. Drift monitoring runs daily by default.
 
-## Drift monitor
+## Limitations
 
-`drift/monitor.py` runs a fixed canary panel per engine on a schedule (default daily) and alerts on: reported
-model id changed, configured model missing from the provider's list (deprecation), response shape changed
-(API change), search-use / citation / length shifts (with confidence intervals), canary error rate.
-Baselines only move when a human accepts them. Alerts go to the UI, Slack and email, deduplicated.
+1. **Sandbox results measure content effects under controlled exposure.** They do not establish ranking gains or guarantee the same answer on another run.
+2. **Provider APIs differ from consumer products.** A configured API model does not reproduce every behavior of ChatGPT, Gemini's consumer app, or Google AI Overviews. AI Overviews is not covered.
+3. **Integration coverage varies.** The project's documented live validation covers the local-model path. Native OpenAI search and delivery connectors need live integration validation; separate Claude/Gemini adapters are not selectable through the guided dashboard.
+4. **The dashboard currently offers export delivery.** Git draft-PR and WordPress connectors exist in the backend but are not exposed in the UI. Git delivery writes HTML to a page's `source_path`, which suits static HTML; framework sites need integration work.
+5. **Storage and cost reporting are prototype-oriented.** SQLite is the default and retrieval uses BM25. Concurrent audit writes need serialization if adapting the app to PostgreSQL. Models missing from the pricing table record tokens with a zero dollar estimate, so the UI is not an authoritative bill.
+6. **Live evidence takes time.** Follow-up measurement defaults to 72 hours after publication is confirmed; search engines may take longer to recrawl the site.
 
-## Known limitations (be aware before relying on it)
+## Repository guide
 
-1. **The sandbox measures content effects, not ranking effects.** Findability (is the site in real search results?) is
-   checked and reported separately and never simulated. The practice test guarantees your page is among the results in
-   both rounds, so it measures how well the page works when found. See
-   [docs/measuring-improvement.md](docs/measuring-improvement.md). Only the post-publish check is real evidence of
-   ranking changes.
-2. **API != consumer app.** Engines are tested through provider APIs; answers in chatgpt.com or AI Overviews can
-   differ, and a small local model is not ChatGPT: results with Ollama show the *mechanics* work, not how a
-   particular commercial assistant will behave. Google AI Overviews has no API and is not covered.
-3. **Only the local-model path has been run live.** The real-OpenAI native search and the deployers were written
-   against documentation and are unit-tested only. The WordPress connector is not exposed in the app.
-4. Git-PR deploy writes the new HTML to the page's `source_path`, so it suits static-HTML sites. For
-   framework-built sites use the CMS connector or the export package.
-5. Retrieval is BM25 (no vector DB) and storage is SQLite by default. For Postgres, serialise audit writes
-   (e.g. `pg_advisory_xact_lock`) to keep the hash chain linear under concurrency.
-6. Live measurement needs time: engines re-crawl slowly (`post_deploy_measure_after_hours`, default 72).
+| Path | What it contains |
+| --- | --- |
+| [frontend/src/pages/](frontend/src/pages/) | Dashboard screens and the guided workflow. |
+| [frontend/src/landing/](frontend/src/landing/) | Home, product, and pricing pages. |
+| [backend/src/confiance/api/](backend/src/confiance/api/) | FastAPI endpoints backing the application. |
+| [backend/src/confiance/pipeline/](backend/src/confiance/pipeline/) | Resumable rounds and bounded improvement loops. |
+| [backend/src/confiance/optimizer/](backend/src/confiance/optimizer/) | Agent, structured operations, and constraint guard. |
+| [backend/src/confiance/search/](backend/src/confiance/search/) and [sim/](backend/src/confiance/sim/) | Search providers, sandbox substitution, scoring, and paired evaluation. |
+| [backend/src/confiance/deploy/](backend/src/confiance/deploy/) | Approval-gated delivery, export packages, and rollback. |
+| [backend/tests/](backend/tests/) | Tests for the pipeline, guard, APIs, measurement, reports, and audit behavior. |
+| [docs/](docs/) | Measurement rationale and provider/search research. |
+
+Further reading: [Measuring improvement](docs/measuring-improvement.md) · [Search integration](docs/search-integration-research.md) · [Model pacing and quota research](docs/free-tier-research.md).
