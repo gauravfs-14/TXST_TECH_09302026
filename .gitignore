@@ -8,3 +8,4 @@ __pycache__/
 .env
 backend/data/
 .claude/
+.gstack/
