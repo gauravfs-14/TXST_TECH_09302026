@@ -151,7 +151,6 @@ The root [run.sh](run.sh) delegates to [start.sh](start.sh), which checks for uv
 | --- | --- |
 | Marketing site | [http://localhost:5173](http://localhost:5173) |
 | Application | [http://localhost:5173/dashboard](http://localhost:5173/dashboard) |
-| Interactive API docs | [http://localhost:8000/docs](http://localhost:8000/docs) |
 
 Keep ports **5173** and **8000** available. The frontend proxies `/api` requests to the backend on port 8000. This launcher runs the development environment; the repository does not currently include a container configuration.
 
